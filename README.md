@@ -6,21 +6,9 @@ It works on both web frontend and api endpoints.
 
 ## Developing
 
-Once you've installed dependencies, start the SvelteKit development server:
-
 ```bash
 npm run dev
 ```
-
-By default, the application will be available at `http://localhost:5173`.
-
-## Features
-
-*   **User-Friendly Web Interface**: Easily fetch and view Bilibili video details through your browser.
-*   **Bilibili Link Parsing**: Input any Bilibili video URL (even with extra text around it) to fetch video details.
-*   **Comprehensive Information Display**: Shows video thumbnail, title, uploader name and fan count, detailed video statistics (views, danmaku, likes, coins, favorites, shares), video description, live viewer counts, and the cleaned video URL.
-*   **Copy to Clipboard**: A button in the web interface to copy all displayed information in a pre-formatted text block.
-*   **Backend API Endpoints**: Provides structured access to video data for programmatic use.
 
 ## Web Interface
 
@@ -73,7 +61,7 @@ The application provides the following API endpoints for programmatic access to 
     *   `url` (required): The Bilibili video URL or text containing the URL. Remember to URL-encode this parameter.
 *   **Example Request**:
     ```
-    GET http://localhost:5173/api/copy?url=https%3A%2F%2Fwww.bilibili.com%2Fvideo%2FBV17x411w7KC%2F
+    GET http://localhost:5173/api/copy?url=https%3A%2F%2Fwww.bilibili.com%2Fvideo%2FBVxxxxx
     ```
 *   **Example Success Response (Plain Text)**:
     ```text
@@ -85,5 +73,5 @@ The application provides the following API endpoints for programmatic access to 
     📁收藏: 1000 🔗分享: 500
     📝简介: 这是一段视频简介...
     🏄‍♂️ 总共 1000 人在观看，800 人在网页端观看
-    https://www.bilibili.com/video/BV17x411w7KC
+    https://www.bilibili.com/video/BVxxxxx
     ```
