@@ -5,7 +5,7 @@ import { error, json } from '@sveltejs/kit';
 const ALLOWED_API_HOSTS = ['api.bilibili.com'];
 
 export const GET: RequestHandler = async ({ url }) => {
-  const apiUrlToProxy = url.searchParams.get('apiUrl');
+  const apiUrlToProxy = url.searchParams.get('url');
 
   if (!apiUrlToProxy) {
     throw error(400, 'Missing apiUrl parameter');

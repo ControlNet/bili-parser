@@ -26,49 +26,112 @@ export function formatNumber(num: number): string {
   return num.toString();
 }
 
-// Function to extract bvid from URL
+// Function to extract bvid from URL. Expects a full Bilibili video URL.
 export function extractBvid(url: string): string | null {
   if (!url) return null;
-  // Regex to find BV id like BV1QL411M7r3, or av id like av170001, or video page like /video/BV1QL411M7r3
+  // Try to match /BVxxxxxxxxxx/ or /BVxxxxxxxxxx? or /BVxxxxxxxxxx directly
   const bvidMatch = url.match(/BV([a-zA-Z0-9]+)/);
   if (bvidMatch && bvidMatch[0]) {
-    return bvidMatch[0];
+    return bvidMatch[0]; // Returns the full BV ID, e.g., "BV1QL411M7r3"
   }
-  // If no BV, try to find common video links and then extract from path
-  const urlPattern = /bilibili\.com\/(?:video\/|bangumi\/play\/ep|bangumi\/play\/ss)(BV[a-zA-Z0-9]+|av[0-9]+|ep[0-9]+|ss[0-9]+)/;
-  const pathMatch = url.match(urlPattern);
-  if (pathMatch && pathMatch[1] && pathMatch[1].startsWith('BV')) {
-      return pathMatch[1];
-  }
+  // Fallback for av numbers if needed in the future, though BV is primary
+  // const avMatch = url.match(/av([0-9]+)/);
+  // if (avMatch && avMatch[0]) { /* convert AV to BV if necessary */ }
   return null;
 }
 
-// Helper function to call the SvelteKit proxy, used by getVideoInfo
-async function fetchViaProxy(targetApiUrl: string, fetchFn: typeof fetch): Promise<any> {
-  // This internal proxyUrl is for calls from the server-side (e.g. /api/parse)
-  // If called from client-side, fetchFn would be window.fetch which hits /api/bili correctly.
-  // If called from server-side, fetchFn would be SvelteKit's fetch, which can hit /api/bili.
-  const proxyUrl = `/api/bili?apiUrl=${encodeURIComponent(targetApiUrl)}`;
-  const response = await fetchFn(proxyUrl); // Use the passed fetch function
+// Helper function to call the SvelteKit proxy for Bilibili API, used by getVideoInfo parts
+async function fetchBiliApiViaProxy(targetApiUrl: string, fetchFn: typeof fetch): Promise<any> {
+  const proxyUrl = `/api/bili?url=${encodeURIComponent(targetApiUrl)}`;
+  const response = await fetchFn(proxyUrl);
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({ message: response.statusText }));
-    throw new Error(`Proxied API request to ${targetApiUrl} failed (${response.status}): ${errorData.message || response.statusText}`);
+    throw new Error(`Proxied Bilibili API request to ${targetApiUrl} failed (${response.status}): ${errorData.message || response.statusText}`);
   }
   return response.json();
 }
 
+async function resolveB23Url(shortUrlInput: string, fetchFn: typeof fetch, isFromServerContext: boolean): Promise<string | null> {
+    let targetB23Url = shortUrlInput;
+    // Ensure it's a full URL for fetching, default to https
+    if (!targetB23Url.match(/^https?:\/\//)) {
+        targetB23Url = 'https://' + targetB23Url.replace(/^b23.tv\//, ''); // Handle cases like b23.tv/xxxx
+        if (!targetB23Url.startsWith('https://b23.tv')) { // if original was just code, prepend host
+             targetB23Url = 'https://b23.tv/' + shortUrlInput.split('/').pop();
+        }
+    }
+    if (!targetB23Url.includes('b23.tv/')) {
+        console.warn("resolveB23Url called with non-b23.tv URL:", targetB23Url);
+        return shortUrlInput; // Return original if it doesn't seem like a b23.tv link to be resolved
+    }
 
-export async function getVideoInfo(bvid: string, fetchFn: typeof fetch): Promise<VideoInfoShape> {
+    try {
+        let resolvedLocation: string | null = null;
+        if (isFromServerContext) {
+            const response = await fetchFn(targetB23Url, { redirect: 'manual' });
+            if (response.status === 301 || response.status === 302) {
+                resolvedLocation = response.headers.get('Location');
+            } else {
+                console.error(`b23.tv direct fetch did not redirect. Status: ${response.status} for ${targetB23Url}`);
+                return null;
+            }
+        } else {
+            // Client-side uses the /api/b23 proxy with 'url' parameter
+            const proxyResolveUrl = `/api/b23?url=${encodeURIComponent(targetB23Url)}`; // Updated path and parameter
+            const response = await fetchFn(proxyResolveUrl);
+            if (!response.ok) {
+                const errorText = await response.text().catch(() => `Resolve proxy failed with status ${response.status}`);
+                console.error(`Error resolving b23.tv link via /api/b23 for ${targetB23Url}: ${errorText}`); // Updated path in log
+                return null;
+            }
+            const data = await response.json();
+            resolvedLocation = data.location;
+        }
+        return resolvedLocation || null;
+    } catch (error) {
+        console.error(`Failed to resolve b23.tv link ${targetB23Url}:`, error);
+        return null;
+    }
+}
+
+export async function getVideoInfo(initialUrl: string, fetchFn: typeof fetch, isFromServerContext: boolean): Promise<VideoInfoShape> {
+  let urlToParse = initialUrl;
+
+  // Check for b23.tv short link pattern or if it's a full b23.tv URL
+  if (initialUrl.includes('b23.tv/') || initialUrl.match(/^b23.tv\/[a-zA-Z0-9]+$/) || initialUrl.match(/^[a-zA-Z0-9]+$/) && initialUrl.length < 15 ) { // Heuristic for short b23 codes
+    // Attempt to make it a full URL if just a code like `4d0kOyh` was passed, assuming it's from b23.tv
+    let potentialB23Url = initialUrl;
+    if (!initialUrl.includes('b23.tv/')) {
+        potentialB23Url = `https://b23.tv/${initialUrl}`;
+    }
+    const resolved = await resolveB23Url(potentialB23Url, fetchFn, isFromServerContext);
+    if (resolved) {
+        urlToParse = resolved;
+    } else {
+        // If resolution fails but it looked like a b23 link, throw an error.
+        // If it didn't look like one, urlToParse remains initialUrl and extractBvid will handle it.
+        if (initialUrl.includes('b23.tv/')) {
+             throw new Error(`Failed to resolve b23.tv short link: ${initialUrl}`);
+        }
+        // Otherwise, proceed with initialUrl, extractBvid will try its best
+    }
+  }
+
+  const bvid = extractBvid(urlToParse);
+
+  if (!bvid) {
+    throw new Error(`Could not extract BVID from URL: ${urlToParse} (original input: ${initialUrl})`);
+  }
+
   const videoInfo: Partial<VideoInfoShape> = { bvid, watchingWeb: 'N/A' };
 
   // 1. Fetch video details (view API)
   const targetViewApiUrl = `https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`;
-  const viewData = await fetchViaProxy(targetViewApiUrl, fetchFn);
+  const viewData = await fetchBiliApiViaProxy(targetViewApiUrl, fetchFn);
 
   if (viewData.code !== 0) {
-    throw new Error(`Bilibili View API error for ${bvid}: ${viewData.message}`);
+    throw new Error(`Bilibili View API error for ${bvid} (${urlToParse}): ${viewData.message}`);
   }
-
   const data = viewData.data;
   videoInfo.title = data.title;
   videoInfo.description = data.desc;
@@ -76,7 +139,6 @@ export async function getVideoInfo(bvid: string, fetchFn: typeof fetch): Promise
   videoInfo.upName = data.owner.name;
   videoInfo.upMid = data.owner.mid;
   videoInfo.cid = data.cid;
-
   videoInfo.views = formatNumber(data.stat.view);
   videoInfo.danmaku = formatNumber(data.stat.danmaku);
   videoInfo.likes = formatNumber(data.stat.like);
@@ -89,15 +151,15 @@ export async function getVideoInfo(bvid: string, fetchFn: typeof fetch): Promise
   if (videoInfo.upMid) {
     const targetRelationApiUrl = `https://api.bilibili.com/x/relation/stat?vmid=${videoInfo.upMid}`;
     try {
-      const relationData = await fetchViaProxy(targetRelationApiUrl, fetchFn);
+      const relationData = await fetchBiliApiViaProxy(targetRelationApiUrl, fetchFn);
       if (relationData.code === 0) {
         videoInfo.upFans = formatNumber(relationData.data.follower);
       } else {
-        console.warn(`Bilibili Relation API warning for mid ${videoInfo.upMid}:`, relationData.message);
+        console.warn(`Bilibili Relation API warning for mid ${videoInfo.upMid} (bvid ${bvid}):`, relationData.message);
         videoInfo.upFans = 'N/A';
       }
     } catch (relationError: any) {
-      console.warn(`Failed to fetch fan count for mid ${videoInfo.upMid}:`, relationError.message);
+      console.warn(`Failed to fetch fan count for mid ${videoInfo.upMid} (bvid ${bvid}):`, relationError.message);
       videoInfo.upFans = 'N/A';
     }
   } else {
@@ -108,7 +170,7 @@ export async function getVideoInfo(bvid: string, fetchFn: typeof fetch): Promise
   if (videoInfo.cid && bvid) {
     const targetOnlineApiUrl = `https://api.bilibili.com/x/player/online/total?bvid=${bvid}&cid=${videoInfo.cid}`;
     try {
-      const onlineData = await fetchViaProxy(targetOnlineApiUrl, fetchFn);
+      const onlineData = await fetchBiliApiViaProxy(targetOnlineApiUrl, fetchFn);
       if (onlineData.code === 0 && onlineData.data) {
         videoInfo.watchingTotal = formatNumber(onlineData.data.total);
         videoInfo.watchingWeb = onlineData.data.web_online ? formatNumber(onlineData.data.web_online) : (onlineData.data.count || 'N/A');

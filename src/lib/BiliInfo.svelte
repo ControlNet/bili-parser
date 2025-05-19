@@ -1,38 +1,34 @@
 <script lang="ts">
   import {
-    extractBvid,
     getVideoInfo,
     formatVideoInfoForCopy,
     type VideoInfoShape
   } from '$lib/biliUtils';
 
   let biliUrl = '';
-  // Initialize with a structure that matches VideoInfoShape but with empty values
-  let videoInfo: Partial<VideoInfoShape> = {}; // Use Partial as it might not be fully populated initially
+  let videoInfo: Partial<VideoInfoShape> = {};
   let loading = false;
   let error = '';
   let copyButtonText = '复制信息';
 
   async function fetchAndSetVideoInfo() {
-    const bvid = extractBvid(biliUrl);
-    if (!bvid) {
-      error = '无效的Bilibili链接或无法提取BV号';
-      videoInfo = {}; // Clear previous info
+    if (!biliUrl.trim()) {
+      error = '请输入Bilibili链接或BV/b23代码';
+      videoInfo = {};
       return;
     }
 
     loading = true;
     error = '';
-    videoInfo = {}; // Clear previous info
+    videoInfo = {};
 
     try {
-      // 'fetch' here is the browser's native fetch, which will correctly hit our /api/bili proxy setup
-      const fetchedInfo = await getVideoInfo(bvid, fetch);
+      const fetchedInfo = await getVideoInfo(biliUrl, fetch, false);
       videoInfo = fetchedInfo;
     } catch (e: any) {
-      console.error(e);
+      console.error('Error in fetchAndSetVideoInfo:', e);
       error = e.message || '获取信息时发生未知错误';
-      videoInfo = {}; // Clear info on error
+      videoInfo = {};
     } finally {
       loading = false;
       copyButtonText = '复制信息';
@@ -44,7 +40,6 @@
       alert('没有可复制的信息。');
       return;
     }
-    // videoInfo is already populated, so we cast it to VideoInfoShape for the formatter
     const textToCopy = formatVideoInfoForCopy(videoInfo as VideoInfoShape);
 
     try {
@@ -66,7 +61,7 @@
 
 <div class="bili-info-container">
   <div class="input-area">
-    <input type="text" bind:value={biliUrl} placeholder="输入Bilibili链接 (例如: https://www.bilibili.com/video/BVxxxxxx)" />
+    <input type="text" bind:value={biliUrl} placeholder="输入Bilibili链接、BV号或b23.tv短链/代码" />
     <button on:click={fetchAndSetVideoInfo} disabled={loading}>
       {loading ? '加载中...' : '获取信息'}
     </button>
@@ -195,12 +190,12 @@
     background-color: #fff;
     border: 1px solid #eee;
     border-radius: 4px;
-    max-height: 150px; /* Added max-height */
-    overflow-y: auto;   /* Added scroll for overflow */
+    max-height: 150px;
+    overflow-y: auto;
   }
 
   .description p {
-    white-space: pre-wrap; /* Allow wrapping for long descriptions */
+    white-space: pre-wrap;
     word-break: break-word;
   }
 
@@ -222,9 +217,9 @@
   }
 
   .copy-button {
-    padding: 10px 15px; /* Adjusted padding to match fetch button if desired */
-    font-size: 16px;    /* Adjusted font size to match fetch button if desired */
-    background-color: #28a745; /* Green */
+    padding: 10px 15px;
+    font-size: 16px;
+    background-color: #28a745;
     color: white;
     border: none;
     border-radius: 4px;
