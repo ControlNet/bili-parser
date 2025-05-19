@@ -1,0 +1,31 @@
+[project]
+authors = ["ControlNet <smczx@hotmail.com>"]
+channels = ["conda-forge"]
+description = "Add a short description here"
+name = "scripts"
+platforms = ["win-64", "osx-64", "linux-64", "osx-arm64"]
+version = "0.1.0"
+
+[tasks]
+bili_parser = "python -m bili_parser"
+
+[dependencies]
+python = "3.12"
+
+[pypi-dependencies]
+pillow = ">=9.0"
+pyperclip = ">=1.8.2"
+pyperclipimg = ">=0.1.0"
+requests = ">=2.32.3, <3"
+
+[target.win-64.dependencies]
+pywin32 = ">=300"
+
+[target.osx-64.dependencies]
+pyobjc-framework-quartz = ">=8.0"
+
+[target.osx-arm64.dependencies]
+pyobjc-framework-quartz = ">=8.0"
+
+[target.linux-64.dependencies]
+xclip = ">=0.13"
