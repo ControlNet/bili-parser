@@ -1,9 +1,39 @@
 import type { RequestHandler } from './$types';
 import { error, json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
+import { toSimplified } from 'chinese-simple2traditional';
 
 // Define allowed Bilibili API hosts for security
 const ALLOWED_API_HOSTS = ['api.bilibili.com'];
+
+// Helper function to convert traditional Chinese to simplified Chinese in subtitle data
+function convertSubtitlesToSimplified(subtitleData: any): any {
+  if (!subtitleData) return subtitleData;
+
+  const converted = { ...subtitleData };
+
+  // Convert main text
+  if (converted.text) {
+    converted.text = toSimplified(converted.text);
+  }
+
+  // Convert segments
+  if (converted.segments && Array.isArray(converted.segments)) {
+    converted.segments = converted.segments.map((segment: any) => ({
+      ...segment,
+      text: segment.text ? toSimplified(segment.text) : segment.text,
+      // Convert words if they exist
+      words: segment.words && Array.isArray(segment.words) 
+        ? segment.words.map((word: any) => ({
+            ...word,
+            word: word.word ? toSimplified(word.word) : word.word
+          }))
+        : segment.words
+    }));
+  }
+
+  return converted;
+}
 
 // Helper function to call Bilibili API via proxy
 async function fetchBiliApiViaProxy(targetApiUrl: string, fetchFn: typeof fetch): Promise<any> {
@@ -117,11 +147,28 @@ export const POST: RequestHandler = async ({ request, fetch }) => {
     // Step 3: Check if it's a cache hit (immediate result)
     if (submitResult.status === 'completed' && submitResult.cached) {
       console.log('Cache hit detected, returning result immediately');
+      
+      // Parse the result if it's a string
+      let subtitleData;
+      if (typeof submitResult.result === 'string') {
+        try {
+          subtitleData = JSON.parse(submitResult.result);
+        } catch {
+          // If it's not JSON, treat as plain text
+          subtitleData = { text: submitResult.result };
+        }
+      } else {
+        subtitleData = submitResult.result;
+      }
+
+      // Convert traditional Chinese to simplified Chinese
+      const convertedSubtitles = convertSubtitlesToSimplified(subtitleData);
+      
       return json({
         success: true,
         job_id: submitResult.job_id,
         status: 'completed',
-        result: submitResult.result,
+        result: convertedSubtitles,
         cached: true,
         message: 'Cache hit - result returned immediately',
         audioUrl,
