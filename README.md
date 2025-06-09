@@ -1,12 +1,26 @@
 # Bilibili Video Info Parser
 
-This is a web application designed to parse Bilibili video links, display detailed video information, and provide a formatted text output for easy copying.
+This is a web application designed to parse Bilibili video links, display detailed video information, and provide a formatted text output for easy copying. It also includes automatic subtitle generation using AI-powered speech recognition.
 
 It works on both web frontend and api endpoints.
 
-## Developing
+## Setup
+
+### Environment Variables
+
+Copy `.env.example` to `.env` and configure the required variables:
 
 ```bash
+cp .env.example .env
+```
+
+Edit `.env` and set:
+- `WHISPER_ASR_URL`: URL of your Whisper ASR service for subtitle generation
+
+### Developing
+
+```bash
+npm install
 npm run dev
 ```
 
@@ -75,3 +89,35 @@ The application provides the following API endpoints for programmatic access to 
     🏄‍♂️ 总共 1000 人在观看，800 人在网页端观看
     https://www.bilibili.com/video/BVxxxxx
     ```
+
+### 3. Generate Subtitles
+
+*   **Endpoint**: `/api/subtitles`
+*   **Method**: `POST`
+*   **Purpose**: Generates AI-powered subtitles from video audio using Whisper ASR.
+*   **Request Body (JSON)**:
+    ```json
+    {
+      "bvid": "BVxxxxx",
+      "cid": "xxxxxx"
+    }
+    ```
+*   **Example Success Response (JSON)**:
+    ```json
+    {
+      "success": true,
+      "audioUrl": "https://...",
+      "subtitles": {
+        "text": "Complete transcript text here...",
+        "segments": [
+          {
+            "start": 0.0,
+            "end": 3.5,
+            "text": "Hello, welcome to this video",
+          }
+        ]
+      }
+    }
+    ```
+
+**Note**: This endpoint requires a configured Whisper ASR service URL in the environment variables.

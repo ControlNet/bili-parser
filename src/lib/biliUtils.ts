@@ -16,6 +16,26 @@ export interface VideoInfoShape {
   cleanedUrl: string;
   cid: string | number;
   bvid: string;
+  subtitles?: SubtitleData;
+}
+
+export interface SubtitleData {
+  text: string;
+  segments: SubtitleSegment[];
+}
+
+export interface SubtitleSegment {
+  start: number;
+  end: number;
+  text: string;
+  words?: SubtitleWord[];
+}
+
+export interface SubtitleWord {
+  start: number;
+  end: number;
+  word: string;
+  probability: number;
 }
 
 // Helper to format large numbers
@@ -186,6 +206,40 @@ export async function getVideoInfo(initialUrl: string, fetchFn: typeof fetch, is
     videoInfo.watchingTotal = 'N/A';
   }
   return videoInfo as VideoInfoShape;
+}
+
+// Function to fetch subtitles for a video
+export async function fetchSubtitles(bvid: string, cid: string | number, fetchFn: typeof fetch): Promise<SubtitleData> {
+  const response = await fetchFn('/api/subtitles', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ bvid, cid: cid.toString() })
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ message: response.statusText }));
+    throw new Error(`Failed to fetch subtitles (${response.status}): ${errorData.message || response.statusText}`);
+  }
+
+  const data = await response.json();
+  
+  // Transform the Whisper ASR response to our format
+  return {
+    text: data.subtitles.text || '',
+    segments: data.subtitles.segments?.map((segment: any) => ({
+      start: segment.start,
+      end: segment.end,
+      text: segment.text,
+      words: segment.words?.map((word: any) => ({
+        start: word.start,
+        end: word.end,
+        word: word.word,
+        probability: word.probability
+      }))
+    })) || []
+  };
 }
 
 export function formatVideoInfoForCopy(videoInfo: VideoInfoShape): string {
