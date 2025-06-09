@@ -3,18 +3,33 @@
     getVideoInfo,
     formatVideoInfoForCopy,
     fetchSubtitles,
+    generateVideoSummary,
     type VideoInfoShape,
     type SubtitleData
   } from '$lib/biliUtils';
+  import { Chat } from '@ai-sdk/svelte';
 
   let biliUrl = '';
   let videoInfo: Partial<VideoInfoShape> = {};
   let loading = false;
   let subtitleLoading = false;
+  let summaryLoading = false;
   let error = '';
   let subtitleError = '';
+  let summaryError = '';
   let copyButtonText = '复制信息';
   let showSubtitles = false;
+  let showSummary = false;
+  let showChat = false;
+
+  // Initialize chat functionality
+  const chat = new Chat({
+    api: '/api/chat',
+    body: {
+      get videoInfo() { return videoInfo; },
+      get subtitles() { return videoInfo.subtitles; }
+    }
+  });
 
   async function fetchAndSetVideoInfo() {
     if (!biliUrl.trim()) {
@@ -60,6 +75,27 @@
       subtitleError = e.message || '生成字幕时发生错误';
     } finally {
       subtitleLoading = false;
+    }
+  }
+
+  async function generateSummary() {
+    if (!videoInfo.title) {
+      summaryError = '请先获取视频信息';
+      return;
+    }
+
+    summaryLoading = true;
+    summaryError = '';
+
+    try {
+      const summary = await generateVideoSummary(videoInfo as VideoInfoShape, fetch);
+      videoInfo.summary = summary;
+      showSummary = true;
+    } catch (e: any) {
+      console.error('Error generating summary:', e);
+      summaryError = e.message || '生成摘要时发生错误';
+    } finally {
+      summaryLoading = false;
     }
   }
 
@@ -112,6 +148,10 @@
 
   {#if subtitleError}
     <p class="error">{subtitleError}</p>
+  {/if}
+
+  {#if summaryError}
+    <p class="error">{summaryError}</p>
   {/if}
 
   {#if videoInfo.title} 
@@ -168,12 +208,103 @@
                 <button on:click={generateSubtitles} class="subtitle-button" disabled={subtitleLoading}>
                   {#if subtitleLoading}
                     <span class="loading-spinner"></span>
-                    生成AI字幕中...
+                    生成AI字幕
                   {:else}
                     生成AI字幕
                   {/if}
                 </button>
               </div>
+            </div>
+          {/if}
+        </div>
+      {/if}
+
+      <!-- AI Summary Section - Always visible when video exists -->
+      {#if videoInfo.title}
+        <div class="ai-section" class:disabled={!videoInfo.subtitles || !videoInfo.subtitles.segments || videoInfo.subtitles.segments.length === 0}>
+          <h3>🤖 AI视频摘要</h3>
+          
+          {#if showSummary && videoInfo.summary}
+            <!-- Show summary content -->
+            <div class="summary-content">
+              <pre>{videoInfo.summary}</pre>
+            </div>
+          {:else}
+            <!-- Show generate summary button -->
+            <div class="ai-button-container">
+              {#if !videoInfo.subtitles || !videoInfo.subtitles.segments || videoInfo.subtitles.segments.length === 0}
+                <button class="ai-button summary-button" disabled>
+                  需要先生成字幕
+                </button>
+              {:else}
+                <button on:click={generateSummary} class="ai-button summary-button" disabled={summaryLoading}>
+                  {#if summaryLoading}
+                    <span class="loading-spinner"></span>
+                    生成AI摘要
+                  {:else}
+                    生成AI摘要
+                  {/if}
+                </button>
+              {/if}
+            </div>
+          {/if}
+        </div>
+      {/if}
+
+      <!-- AI Chat Section - Always visible when video exists -->
+      {#if videoInfo.title}
+        <div class="ai-section" class:disabled={!videoInfo.subtitles || !videoInfo.subtitles.segments || videoInfo.subtitles.segments.length === 0}>
+          <h3>💬 与AI聊天视频内容</h3>
+          
+          {#if showChat && videoInfo.subtitles && videoInfo.subtitles.segments && videoInfo.subtitles.segments.length > 0}
+            <!-- Show chat interface -->
+            <div class="chat-container">
+              <div class="chat-messages">
+                {#each chat.messages as message}
+                  <div class="message {message.role}">
+                    <div class="message-content">
+                      {#each message.parts as part}
+                        {#if part.type === 'text'}
+                          {part.text}
+                        {/if}
+                      {/each}
+                    </div>
+                  </div>
+                {/each}
+                
+                {#if chat.isLoading}
+                  <div class="message assistant">
+                    <div class="message-content">
+                      <span class="typing-indicator">AI正在思考...</span>
+                    </div>
+                  </div>
+                {/if}
+              </div>
+              
+              <form on:submit={chat.handleSubmit} class="chat-form">
+                <input
+                  bind:value={chat.input}
+                  placeholder="问问AI关于这个视频的任何问题..."
+                  class="chat-input"
+                  disabled={chat.isLoading}
+                />
+                <button type="submit" class="chat-send" disabled={chat.isLoading || !chat.input.trim()}>
+                  发送
+                </button>
+              </form>
+            </div>
+          {:else}
+            <!-- Show start chat button -->
+            <div class="ai-button-container">
+              {#if !videoInfo.subtitles || !videoInfo.subtitles.segments || videoInfo.subtitles.segments.length === 0}
+                <button class="ai-button chat-button" disabled>
+                  需要先生成字幕
+                </button>
+              {:else}
+                <button on:click={() => showChat = true} class="ai-button chat-button">
+                  与AI聊天
+                </button>
+              {/if}
             </div>
           {/if}
         </div>
@@ -322,7 +453,7 @@
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    min-width: 120px;
+    min-width: 240px;
     justify-content: center;
   }
 
@@ -345,6 +476,17 @@
     border-top: 2px solid white;
     border-radius: 50%;
     animation: spin 1s linear infinite;
+    display: inline-block;
+    margin-right: 8px;
+    vertical-align: middle;
+  }
+
+  .ai-button .loading-spinner {
+    border-top-color: white;
+  }
+
+  .subtitle-button .loading-spinner {
+    border-top-color: white;
   }
 
   @keyframes spin {
@@ -432,6 +574,217 @@
     flex: 1;
     line-height: 1.6;
     color: #495057;
+  }
+
+  .summary-button {
+    padding: 10px 15px;
+    font-size: 16px;
+    background-color: #6f42c1;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+  }
+
+  .summary-button:hover:not(:disabled) {
+    background-color: #5a2d9b;
+  }
+
+  .summary-button:disabled {
+    background-color: #aaa;
+    cursor: not-allowed;
+  }
+
+  .chat-button {
+    padding: 10px 15px;
+    font-size: 16px;
+    background-color: #e83e8c;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+  }
+
+  .chat-button:hover {
+    background-color: #d91a72;
+  }
+
+  .ai-section {
+    margin-top: 25px;
+    padding: 20px;
+    background-color: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+  }
+
+  .ai-button-container {
+    display: flex;
+    justify-content: center;
+    padding: 20px;
+  }
+
+  .ai-button {
+    padding: 12px 24px;
+    font-size: 16px;
+    font-weight: 500;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    min-width: 240px;
+    text-align: center;
+  }
+
+  .ai-button.summary-button {
+    background-color: #6f42c1;
+    color: white;
+  }
+
+  .ai-button.summary-button:hover:not(:disabled) {
+    background-color: #5a2d9b;
+    transform: translateY(-1px);
+  }
+
+  .ai-button.chat-button {
+    background-color: #e83e8c;
+    color: white;
+  }
+
+  .ai-button.chat-button:hover {
+    background-color: #d91a72;
+    transform: translateY(-1px);
+  }
+
+  .ai-button:disabled {
+    background-color: #aaa;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  .ai-section.disabled {
+    opacity: 0.6;
+    background-color: #f1f1f1;
+  }
+
+  .ai-section.disabled h3 {
+    color: #999;
+  }
+
+  .ai-requirement-note {
+    margin-top: 10px;
+    font-size: 14px;
+    color: #6c757d;
+    text-align: center;
+    font-style: italic;
+    margin-bottom: 0;
+  }
+
+  .ai-section h3 {
+    margin-top: 0;
+    margin-bottom: 15px;
+    color: #495057;
+  }
+
+  .summary-content {
+    background-color: white;
+    padding: 15px;
+    border-radius: 6px;
+    border: 1px solid #e9ecef;
+  }
+
+  .summary-content pre {
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin: 0;
+    font-family: inherit;
+    line-height: 1.6;
+  }
+
+  .chat-container {
+    display: flex;
+    flex-direction: column;
+    height: 400px;
+  }
+
+  .chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 15px;
+    background-color: white;
+    border: 1px solid #e9ecef;
+    border-radius: 6px 6px 0 0;
+    margin-bottom: 0;
+  }
+
+  .message {
+    margin-bottom: 15px;
+    display: flex;
+  }
+
+  .message.user {
+    justify-content: flex-end;
+  }
+
+  .message.assistant {
+    justify-content: flex-start;
+  }
+
+  .message-content {
+    max-width: 80%;
+    padding: 10px 15px;
+    border-radius: 12px;
+    line-height: 1.5;
+  }
+
+  .message.user .message-content {
+    background-color: #007bff;
+    color: white;
+  }
+
+  .message.assistant .message-content {
+    background-color: #f1f3f4;
+    color: #333;
+  }
+
+  .typing-indicator {
+    font-style: italic;
+    color: #6c757d;
+  }
+
+  .chat-form {
+    display: flex;
+    background-color: white;
+    border: 1px solid #e9ecef;
+    border-top: none;
+    border-radius: 0 0 6px 6px;
+  }
+
+  .chat-input {
+    flex: 1;
+    padding: 12px;
+    border: none;
+    outline: none;
+    font-size: 16px;
+  }
+
+  .chat-send {
+    padding: 12px 20px;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    cursor: pointer;
+    transition: background-color 0.2s;
+  }
+
+  .chat-send:hover:not(:disabled) {
+    background-color: #0056b3;
+  }
+
+  .chat-send:disabled {
+    background-color: #aaa;
+    cursor: not-allowed;
   }
 
 </style> 

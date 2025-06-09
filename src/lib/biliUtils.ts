@@ -17,6 +17,7 @@ export interface VideoInfoShape {
   cid: string | number;
   bvid: string;
   subtitles?: SubtitleData;
+  summary?: string;
 }
 
 export interface SubtitleData {
@@ -240,6 +241,28 @@ export async function fetchSubtitles(bvid: string, cid: string | number, fetchFn
       }))
     })) || []
   };
+}
+
+// Function to generate video summary using AI
+export async function generateVideoSummary(videoInfo: VideoInfoShape, fetchFn: typeof fetch): Promise<string> {
+  const response = await fetchFn('/api/summarize', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ 
+      videoInfo, 
+      subtitles: videoInfo.subtitles 
+    })
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ message: response.statusText }));
+    throw new Error(`Failed to generate summary (${response.status}): ${errorData.message || response.statusText}`);
+  }
+
+  const data = await response.json();
+  return data.summary;
 }
 
 export function formatVideoInfoForCopy(videoInfo: VideoInfoShape): string {
