@@ -1,6 +1,6 @@
 import type { RequestHandler } from './$types';
 import { error, json } from '@sveltejs/kit';
-import { WHISPER_ASR_URL } from '$env/static/private';
+import { env } from '$env/dynamic/private';
 import { toSimplified } from 'chinese-simple2traditional';
 
 // Define allowed Bilibili API hosts for security
@@ -82,6 +82,8 @@ async function getAudioUrl(bvid: string, cid: string, fetchFn: typeof fetch): Pr
 
 // Helper function to call Whisper ASR service
 async function generateSubtitles(audioUrl: string): Promise<any> {
+  const WHISPER_ASR_URL = env.WHISPER_ASR_URL;
+  
   if (!WHISPER_ASR_URL) {
     throw new Error('WHISPER_ASR_URL environment variable is not configured');
   }
