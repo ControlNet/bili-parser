@@ -17,6 +17,17 @@ cp .env.example .env
 Edit `.env` and set:
 - `WHISPER_ASR_URL`: URL of your Whisper ASR service for subtitle generation
 
+### Whisper ASR API Deploy
+
+Deploy the whisper ASR API in GPU machine.
+
+```bash
+docker run -d --gpus all -p 9000:9000 --name whisper \
+  -e ASR_MODEL=base \
+  -e ASR_ENGINE=openai_whisper -v $HOME/.cache:/root/.cache -e "UID=$UID" -e "GID=$GID" \
+  controlnet/whisper-api
+```
+
 ### Developing
 
 ```bash
