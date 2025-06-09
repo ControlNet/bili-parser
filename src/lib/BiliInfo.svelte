@@ -57,6 +57,9 @@
     }
   }
 
+  let subtitleJobId: string | null = null;
+  let subtitleStatus: string = '';
+
   async function generateSubtitles() {
     if (!videoInfo.bvid || !videoInfo.cid) {
       subtitleError = '缺少视频信息，无法生成字幕';
@@ -65,17 +68,100 @@
 
     subtitleLoading = true;
     subtitleError = '';
+    subtitleStatus = '正在提交任务...';
 
     try {
-      const subtitleData = await fetchSubtitles(videoInfo.bvid, videoInfo.cid, fetch);
-      videoInfo.subtitles = subtitleData;
-      showSubtitles = true;
+      // Step 1: Submit the job
+      const submitResponse = await fetch('/api/subtitles_submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bvid: videoInfo.bvid,
+          cid: videoInfo.cid
+        })
+      });
+
+      if (!submitResponse.ok) {
+        const errorData = await submitResponse.json();
+        throw new Error(errorData.message || '提交字幕生成任务失败');
+      }
+
+      const submitResult = await submitResponse.json();
+      subtitleJobId = submitResult.jobId;
+      subtitleStatus = '任务已提交，正在处理...';
+
+      // Step 2: Poll for results
+      await pollForSubtitleResult();
+
     } catch (e: any) {
       console.error('Error generating subtitles:', e);
       subtitleError = e.message || '生成字幕时发生错误';
-    } finally {
       subtitleLoading = false;
+      subtitleStatus = '';
     }
+  }
+
+  async function pollForSubtitleResult() {
+    if (!subtitleJobId) return;
+
+    const pollInterval = 10000; // Poll every 10 seconds
+    const maxAttempts = 1000;
+    let attempts = 0;
+
+    const poll = async () => {
+      try {
+        attempts++;
+        
+        const response = await fetch('/api/subtitles_get', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jobId: subtitleJobId })
+        });
+
+        if (!response.ok) {
+          throw new Error('检查任务状态失败');
+        }
+
+        const result = await response.json();
+
+        switch (result.status) {
+          case 'completed':
+            videoInfo.subtitles = result.subtitles;
+            showSubtitles = true;
+            subtitleLoading = false;
+            subtitleStatus = '字幕生成完成！';
+            setTimeout(() => { subtitleStatus = ''; }, 3000);
+            return;
+
+          case 'failed':
+            throw new Error(result.error || '字幕生成失败');
+
+          case 'processing':
+            subtitleStatus = '正在处理音频文件...';
+            break;
+
+          case 'pending':
+            subtitleStatus = '任务排队中...';
+            break;
+        }
+
+        // Continue polling if job is not complete and we haven't exceeded max attempts
+        if (attempts < maxAttempts) {
+          setTimeout(poll, pollInterval);
+        } else {
+          throw new Error('字幕生成超时，请稍后重试');
+        }
+
+      } catch (e: any) {
+        console.error('Error polling for subtitle result:', e);
+        subtitleError = e.message || '检查字幕生成状态时发生错误';
+        subtitleLoading = false;
+        subtitleStatus = '';
+      }
+    };
+
+    // Start polling
+    setTimeout(poll, pollInterval);
   }
 
   async function generateSummary() {
@@ -213,6 +299,9 @@
                     生成AI字幕
                   {/if}
                 </button>
+                {#if subtitleStatus}
+                  <p class="subtitle-status">{subtitleStatus}</p>
+                {/if}
               </div>
             </div>
           {/if}
@@ -525,6 +614,14 @@
 
   .subtitle-button-container {
     text-align: center;
+  }
+
+  .subtitle-status {
+    margin-top: 10px;
+    font-size: 14px;
+    color: #17a2b8;
+    font-style: italic;
+    margin-bottom: 0;
   }
 
   .subtitle-segments {

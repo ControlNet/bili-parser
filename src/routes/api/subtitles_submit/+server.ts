@@ -1,39 +1,9 @@
 import type { RequestHandler } from './$types';
 import { error, json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
-import { toSimplified } from 'chinese-simple2traditional';
 
 // Define allowed Bilibili API hosts for security
 const ALLOWED_API_HOSTS = ['api.bilibili.com'];
-
-// Helper function to convert traditional Chinese to simplified Chinese in subtitle data
-function convertSubtitlesToSimplified(subtitleData: any): any {
-  if (!subtitleData) return subtitleData;
-
-  const converted = { ...subtitleData };
-
-  // Convert main text
-  if (converted.text) {
-    converted.text = toSimplified(converted.text);
-  }
-
-  // Convert segments
-  if (converted.segments && Array.isArray(converted.segments)) {
-    converted.segments = converted.segments.map((segment: any) => ({
-      ...segment,
-      text: segment.text ? toSimplified(segment.text) : segment.text,
-      // Convert words if they exist
-      words: segment.words && Array.isArray(segment.words) 
-        ? segment.words.map((word: any) => ({
-            ...word,
-            word: word.word ? toSimplified(word.word) : word.word
-          }))
-        : segment.words
-    }));
-  }
-
-  return converted;
-}
 
 // Helper function to call Bilibili API via proxy
 async function fetchBiliApiViaProxy(targetApiUrl: string, fetchFn: typeof fetch): Promise<any> {
@@ -80,8 +50,8 @@ async function getAudioUrl(bvid: string, cid: string, fetchFn: typeof fetch): Pr
   }
 }
 
-// Helper function to call Whisper ASR service
-async function generateSubtitles(audioUrl: string): Promise<any> {
+// Helper function to submit job to Whisper ASR service
+async function submitSubtitleJob(audioUrl: string): Promise<string> {
   const WHISPER_ASR_URL = env.WHISPER_ASR_URL;
   
   if (!WHISPER_ASR_URL) {
@@ -99,7 +69,7 @@ async function generateSubtitles(audioUrl: string): Promise<any> {
   });
 
   try {
-    const response = await fetch(`${WHISPER_ASR_URL}/asr?${params}`, {
+    const response = await fetch(`${WHISPER_ASR_URL}/submit?${params}`, {
       method: 'POST',
       headers: {
         'Accept': 'application/json',
@@ -112,10 +82,11 @@ async function generateSubtitles(audioUrl: string): Promise<any> {
       throw new Error(`Whisper ASR service error: ${errorMessage}`);
     }
 
-    return await response.json();
+    const result = await response.json();
+    return result.job_id;
   } catch (e: any) {
-    console.error('Error calling Whisper ASR service:', e);
-    throw new Error(`Failed to generate subtitles: ${e.message}`);
+    console.error('Error submitting job to Whisper ASR service:', e);
+    throw new Error(`Failed to submit subtitle job: ${e.message}`);
   }
 }
 
@@ -132,22 +103,20 @@ export const POST: RequestHandler = async ({ request, fetch }) => {
     const audioUrl = await getAudioUrl(bvid, cid, fetch);
     console.log(`Audio URL obtained: ${audioUrl}`);
 
-    // Step 2: Send audio URL to Whisper ASR service
-    console.log('Sending to Whisper ASR service...');
-    const rawSubtitleData = await generateSubtitles(audioUrl);
-
-    // Step 3: Convert traditional Chinese to simplified Chinese
-    console.log('Converting traditional Chinese to simplified Chinese...');
-    const subtitleData = convertSubtitlesToSimplified(rawSubtitleData);
+    // Step 2: Submit job to Whisper ASR service
+    console.log('Submitting job to Whisper ASR service...');
+    const jobId = await submitSubtitleJob(audioUrl);
+    console.log(`Job submitted with ID: ${jobId}`);
 
     return json({
       success: true,
+      jobId,
       audioUrl,
-      subtitles: subtitleData
+      message: 'Subtitle generation job submitted successfully'
     });
 
   } catch (e: any) {
-    console.error('Subtitle generation error:', e);
-    throw error(500, e.message || 'Failed to generate subtitles');
+    console.error('Subtitle job submission error:', e);
+    throw error(500, e.message || 'Failed to submit subtitle generation job');
   }
 }; 
