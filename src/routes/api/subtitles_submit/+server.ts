@@ -51,7 +51,7 @@ async function getAudioUrl(bvid: string, cid: string, fetchFn: typeof fetch): Pr
 }
 
 // Helper function to submit job to Whisper ASR service
-async function submitSubtitleJob(audioUrl: string): Promise<string> {
+async function submitSubtitleJob(audioUrl: string, audioId?: string): Promise<any> {
   const WHISPER_ASR_URL = env.WHISPER_ASR_URL;
   
   if (!WHISPER_ASR_URL) {
@@ -68,6 +68,11 @@ async function submitSubtitleJob(audioUrl: string): Promise<string> {
     vad_filter: 'true'
   });
 
+  // Add audio_id for caching if provided
+  if (audioId) {
+    params.set('audio_id', audioId);
+  }
+
   try {
     const response = await fetch(`${WHISPER_ASR_URL}/submit?${params}`, {
       method: 'POST',
@@ -83,7 +88,7 @@ async function submitSubtitleJob(audioUrl: string): Promise<string> {
     }
 
     const result = await response.json();
-    return result.job_id;
+    return result;
   } catch (e: any) {
     console.error('Error submitting job to Whisper ASR service:', e);
     throw new Error(`Failed to submit subtitle job: ${e.message}`);
@@ -103,17 +108,40 @@ export const POST: RequestHandler = async ({ request, fetch }) => {
     const audioUrl = await getAudioUrl(bvid, cid, fetch);
     console.log(`Audio URL obtained: ${audioUrl}`);
 
-    // Step 2: Submit job to Whisper ASR service
-    console.log('Submitting job to Whisper ASR service...');
-    const jobId = await submitSubtitleJob(audioUrl);
-    console.log(`Job submitted with ID: ${jobId}`);
+    // Step 2: Submit job to Whisper ASR service with cache ID
+    const audioId = `bili_${bvid}_${cid}`;
+    console.log(`Submitting job to Whisper ASR service with audio_id: ${audioId}...`);
+    const submitResult = await submitSubtitleJob(audioUrl, audioId);
+    console.log(`Job submitted with ID: ${submitResult.job_id}`);
 
-    return json({
-      success: true,
-      jobId,
-      audioUrl,
-      message: 'Subtitle generation job submitted successfully'
-    });
+    // Step 3: Check if it's a cache hit (immediate result)
+    if (submitResult.status === 'completed' && submitResult.cached) {
+      console.log('Cache hit detected, returning result immediately');
+      return json({
+        success: true,
+        job_id: submitResult.job_id,
+        status: 'completed',
+        result: submitResult.result,
+        cached: true,
+        message: 'Cache hit - result returned immediately',
+        audioUrl,
+        created_at: submitResult.created_at,
+        started_at: submitResult.started_at,
+        completed_at: submitResult.completed_at
+      });
+    } else {
+      // No cache hit, return job ID for polling
+      console.log('No cache hit, job queued for processing');
+      return json({
+        success: true,
+        job_id: submitResult.job_id,
+        status: 'submitted',
+        cached: false,
+        message: 'Job submitted successfully. Use polling to check status.',
+        audioUrl,
+        created_at: submitResult.created_at
+      });
+    }
 
   } catch (e: any) {
     console.error('Subtitle job submission error:', e);

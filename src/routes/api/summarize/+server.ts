@@ -1,6 +1,6 @@
 import type { RequestHandler } from './$types';
 import { error, json } from '@sveltejs/kit';
-import { generateText } from 'ai';
+import { streamText } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
@@ -60,7 +60,7 @@ ${subtitleText}
 1. 视频主要内容概括 (2-3句话)
 2. 关键要点 (3-5个要点)
 3. 视频类型/风格
-4. 推荐观看人群
+4. 你的看法 (2-3句话)
 
 请用中文回复，格式清晰易读。
 `;
@@ -68,19 +68,15 @@ ${subtitleText}
     // Get the configured model
     const model = getAvailableModel();
 
-    // Generate the summary
-    const { text: summary } = await generateText({
+    // Generate the streaming summary
+    const result = await streamText({
       model,
       prompt,
       maxTokens: 1000,
       temperature: 0.7,
     });
 
-    return json({
-      success: true,
-      summary,
-      provider: model.provider,
-    });
+    return result.toDataStreamResponse();
 
   } catch (e: any) {
     console.error('Video summarization error:', e);

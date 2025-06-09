@@ -97,8 +97,8 @@ export const POST: RequestHandler = async ({ request }) => {
           success: true,
           status: 'completed',
           subtitles: convertedSubtitles,
-          jobId,
-          completedAt: jobResult.completed_at
+          job_id: jobId,
+          completed_at: jobResult.completed_at
         });
 
       case 'failed':
@@ -107,7 +107,7 @@ export const POST: RequestHandler = async ({ request }) => {
           success: false,
           status: 'failed',
           error: jobResult.error || 'Job processing failed',
-          jobId
+          job_id: jobId
         });
 
       case 'processing':
@@ -116,8 +116,8 @@ export const POST: RequestHandler = async ({ request }) => {
           success: true,
           status: 'processing',
           message: 'Job is currently being processed',
-          jobId,
-          startedAt: jobResult.started_at
+          job_id: jobId,
+          started_at: jobResult.started_at
         });
 
       case 'pending':
@@ -127,8 +127,8 @@ export const POST: RequestHandler = async ({ request }) => {
           success: true,
           status: 'pending',
           message: 'Job is queued for processing',
-          jobId,
-          createdAt: jobResult.created_at
+          job_id: jobId,
+          created_at: jobResult.created_at
         });
     }
 

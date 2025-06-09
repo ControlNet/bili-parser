@@ -21,6 +21,7 @@
   let showSubtitles = false;
   let showSummary = false;
   let showChat = false;
+  let chatMessagesContainer: HTMLElement;
 
   // Initialize chat functionality
   const chat = new Chat({
@@ -28,8 +29,21 @@
     body: {
       get videoInfo() { return videoInfo; },
       get subtitles() { return videoInfo.subtitles; }
+    },
+    onFinish: () => {
+      // Auto-scroll to bottom when message finishes
+      if (chatMessagesContainer) {
+        chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
+      }
     }
   });
+
+  // Auto-scroll when messages update or when streaming
+  $: if (chat.messages.length > 0 && chatMessagesContainer) {
+    setTimeout(() => {
+      chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
+    }, 50);
+  }
 
   async function fetchAndSetVideoInfo() {
     if (!biliUrl.trim()) {
@@ -87,11 +101,36 @@
       }
 
       const submitResult = await submitResponse.json();
-      subtitleJobId = submitResult.jobId;
-      subtitleStatus = '任务已提交，正在处理...';
+      subtitleJobId = submitResult.job_id;
 
-      // Step 2: Poll for results
-      await pollForSubtitleResult();
+      console.log(submitResult);
+
+      // Check if it's a cache hit (immediate result)
+      if (submitResult.status === 'completed' && submitResult.cached) {
+        // Cache hit - process result immediately
+        subtitleStatus = '处理成功';
+        
+        // Parse the result if it's a string
+        let subtitleData;
+        if (typeof submitResult.result === 'string') {
+          try {
+            subtitleData = JSON.parse(submitResult.result);
+          } catch {
+            subtitleData = { text: submitResult.result };
+          }
+        } else {
+          subtitleData = submitResult.result;
+        }
+
+        videoInfo.subtitles = subtitleData;
+        showSubtitles = true;
+        subtitleLoading = false;
+        setTimeout(() => { subtitleStatus = ''; }, 3000);
+      } else {
+        // No cache hit - start polling
+        subtitleStatus = '任务已提交，正在处理...';
+        await pollForSubtitleResult();
+      }
 
     } catch (e: any) {
       console.error('Error generating subtitles:', e);
@@ -172,14 +211,69 @@
 
     summaryLoading = true;
     summaryError = '';
+    videoInfo.summary = ''; // Clear previous summary
+    showSummary = true; // Show the summary section immediately
 
     try {
-      const summary = await generateVideoSummary(videoInfo as VideoInfoShape, fetch);
-      videoInfo.summary = summary;
-      showSummary = true;
+      const response = await fetch('/api/summarize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          videoInfo: videoInfo,
+          subtitles: videoInfo.subtitles
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ message: response.statusText }));
+        throw new Error(errorData.message || `HTTP ${response.status}`);
+      }
+
+      if (!response.body) {
+        throw new Error('No response body for streaming');
+      }
+
+      // Handle streaming response
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let summary = '';
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          
+          if (done) break;
+          
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n');
+          
+          for (const line of lines) {
+            if (line.startsWith('0:')) {
+              // Parse the streaming data format
+              const data = line.slice(2);
+              if (data) {
+                try {
+                  // Parse JSON-encoded string to remove quotes and unescape characters
+                  const parsedData = JSON.parse(data);
+                  summary += parsedData;
+                  videoInfo.summary = summary;
+                } catch {
+                  // Fallback: use raw data if JSON parsing fails
+                  summary += data;
+                  videoInfo.summary = summary;
+                }
+              }
+            }
+          }
+        }
+      } finally {
+        reader.releaseLock();
+      }
+
     } catch (e: any) {
       console.error('Error generating summary:', e);
       summaryError = e.message || '生成摘要时发生错误';
+      showSummary = false;
     } finally {
       summaryLoading = false;
     }
@@ -313,10 +407,13 @@
         <div class="ai-section" class:disabled={!videoInfo.subtitles || !videoInfo.subtitles.segments || videoInfo.subtitles.segments.length === 0}>
           <h3>🤖 AI视频摘要</h3>
           
-          {#if showSummary && videoInfo.summary}
+          {#if showSummary && (videoInfo.summary || summaryLoading)}
             <!-- Show summary content -->
             <div class="summary-content">
               <pre>{videoInfo.summary}</pre>
+              {#if summaryLoading && videoInfo.summary}
+                <span class="typing-indicator">AI正在继续生成...</span>
+              {/if}
             </div>
           {:else}
             <!-- Show generate summary button -->
@@ -348,20 +445,23 @@
           {#if showChat && videoInfo.subtitles && videoInfo.subtitles.segments && videoInfo.subtitles.segments.length > 0}
             <!-- Show chat interface -->
             <div class="chat-container">
-              <div class="chat-messages">
-                {#each chat.messages as message}
+              <div class="chat-messages" bind:this={chatMessagesContainer}>
+                {#each chat.messages as message, i}
                   <div class="message {message.role}">
                     <div class="message-content">
                       {#each message.parts as part}
                         {#if part.type === 'text'}
-                          {part.text}
+                          <span class="message-text">{part.text}</span>
                         {/if}
                       {/each}
+                      {#if message.role === 'assistant' && i === chat.messages.length - 1 && chat.isLoading}
+                        <span class="typing-indicator">▋</span>
+                      {/if}
                     </div>
                   </div>
                 {/each}
                 
-                {#if chat.isLoading}
+                {#if chat.isLoading && chat.messages.length === 0}
                   <div class="message assistant">
                     <div class="message-content">
                       <span class="typing-indicator">AI正在思考...</span>
@@ -378,7 +478,12 @@
                   disabled={chat.isLoading}
                 />
                 <button type="submit" class="chat-send" disabled={chat.isLoading || !chat.input.trim()}>
-                  发送
+                  {#if chat.isLoading}
+                    <span class="loading-spinner"></span>
+                    发送中
+                  {:else}
+                    发送
+                  {/if}
                 </button>
               </form>
             </div>
@@ -797,6 +902,21 @@
     margin: 0;
     font-family: inherit;
     line-height: 1.6;
+    min-height: 20px; /* Prevent layout shift */
+  }
+
+  .summary-content .typing-indicator {
+    display: block;
+    margin-top: 10px;
+    font-style: italic;
+    color: #6c757d;
+    font-size: 14px;
+    animation: pulse 1.5s ease-in-out infinite alternate;
+  }
+
+  @keyframes pulse {
+    0% { opacity: 0.6; }
+    100% { opacity: 1; }
   }
 
   .chat-container {
@@ -833,6 +953,11 @@
     padding: 10px 15px;
     border-radius: 12px;
     line-height: 1.5;
+    position: relative;
+  }
+
+  .message-text {
+    display: inline;
   }
 
   .message.user .message-content {
@@ -848,6 +973,26 @@
   .typing-indicator {
     font-style: italic;
     color: #6c757d;
+    animation: blink 1s infinite;
+  }
+
+  .message-content .typing-indicator {
+    display: inline;
+    margin-left: 2px;
+    font-size: 16px;
+    font-weight: bold;
+    color: #007bff;
+    animation: cursor-blink 1s infinite;
+  }
+
+  @keyframes cursor-blink {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0; }
+  }
+
+  @keyframes blink {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0.3; }
   }
 
   .chat-form {
