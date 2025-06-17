@@ -5,9 +5,15 @@
     fetchSubtitles,
     generateVideoSummary,
     type VideoInfoShape,
-    type SubtitleData
+    type SubtitleData,
+    extractBvid
   } from '$lib/biliUtils';
   import { Chat } from '@ai-sdk/svelte';
+  import { onMount } from 'svelte';
+  import { browser } from '$app/environment';
+  import BilibiliPlayer from './BilibiliPlayer.svelte';
+
+  export let initialBvid: string | undefined = undefined;
 
   let biliUrl = '';
   let videoInfo: Partial<VideoInfoShape> = {};
@@ -22,6 +28,7 @@
   let showSummary = false;
   let showChat = false;
   let chatMessagesContainer: HTMLElement;
+  let chatLoading = false;
 
   // Initialize chat functionality
   const chat = new Chat({
@@ -35,8 +42,20 @@
       if (chatMessagesContainer) {
         chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
       }
+      chatLoading = false;
+    },
+    onError: () => {
+      // Reset loading state on error
+      chatLoading = false;
     }
   });
+
+  // Override the handleSubmit to track loading state
+  const originalHandleSubmit = chat.handleSubmit;
+  chat.handleSubmit = (event?: { preventDefault?: () => void } | undefined, options?: any) => {
+    chatLoading = true;
+    return originalHandleSubmit(event, options);
+  };
 
   // Auto-scroll when messages update or when streaming
   $: if (chat.messages.length > 0 && chatMessagesContainer) {
@@ -44,6 +63,48 @@
       chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
     }, 50);
   }
+
+  // Handle initial BV ID from URL
+  onMount(() => {
+    if (initialBvid) {
+      biliUrl = initialBvid;
+      fetchAndSetVideoInfo();
+    }
+    
+    // Handle browser back/forward navigation
+    const handlePopState = (event: PopStateEvent) => {
+      if (browser) {
+        const currentPath = window.location.pathname;
+        if (currentPath === '/') {
+          // User navigated back to root - clear the current video info
+          videoInfo = {};
+          biliUrl = '';
+          error = '';
+          showSubtitles = false;
+          showSummary = false;
+          showChat = false;
+          document.title = 'Bilibili Info Parser';
+        } else if (currentPath.startsWith('/BV')) {
+          // User navigated to a BV ID URL - extract and load the video
+          const bvidFromUrl = currentPath.substring(1); // Remove leading '/'
+          if (bvidFromUrl.match(/^BV[a-zA-Z0-9]+$/)) {
+            // Valid BV ID format - load the video info
+            biliUrl = bvidFromUrl;
+            fetchAndSetVideoInfo();
+          }
+        }
+      }
+    };
+    
+    if (browser) {
+      window.addEventListener('popstate', handlePopState);
+      
+      // Cleanup
+      return () => {
+        window.removeEventListener('popstate', handlePopState);
+      };
+    }
+  });
 
   async function fetchAndSetVideoInfo() {
     if (!biliUrl.trim()) {
@@ -61,6 +122,27 @@
     try {
       const fetchedInfo = await getVideoInfo(biliUrl, fetch, false);
       videoInfo = fetchedInfo;
+      
+      // Update URL if we have a valid BV ID (only in browser)
+      if (videoInfo.bvid && browser) {
+        const expectedPath = `/${videoInfo.bvid}`;
+        const currentPath = window.location.pathname;
+        
+        if (currentPath !== expectedPath) {
+          // Use pushState when navigating from root to create browser history
+          // Use replaceState when already on a BV ID route to avoid duplicate entries
+          if (currentPath === '/') {
+            // Coming from root URL - create new history entry so back button works
+            window.history.pushState({ bvid: videoInfo.bvid }, '', expectedPath);
+          } else {
+            // Already on a BV ID route - just update current entry
+            window.history.replaceState({ bvid: videoInfo.bvid }, '', expectedPath);
+          }
+          
+          // Update document title to reflect the BV ID
+          document.title = `Bilibili Info Parser - ${videoInfo.bvid}`;
+        }
+      }
     } catch (e: any) {
       console.error('Error in fetchAndSetVideoInfo:', e);
       error = e.message || '获取信息时发生未知错误';
@@ -334,6 +416,65 @@
     <p class="error">{summaryError}</p>
   {/if}
 
+  <!-- Welcome Placeholder -->
+  {#if !videoInfo.title && !error}
+    <div class="welcome-section" class:loading={loading}>
+      <div class="welcome-content">
+        <div class="welcome-icon">
+          🎬
+        </div>
+        <h2 class="welcome-title">欢迎使用 Bilibili 解析器</h2>
+        <p class="welcome-description">
+          解析 Bilibili 视频信息，生成 AI 字幕和摘要，与 AI 聊天视频内容
+        </p>
+        
+        <div class="feature-grid">
+          <div class="feature-item">
+            <span class="feature-icon">📊</span>
+            <span class="feature-text">视频信息</span>
+          </div>
+          <div class="feature-item">
+            <span class="feature-icon">🎵</span>
+            <span class="feature-text">AI字幕</span>
+          </div>
+          <div class="feature-item">
+            <span class="feature-icon">🤖</span>
+            <span class="feature-text">AI摘要</span>
+          </div>
+          <div class="feature-item">
+            <span class="feature-icon">💬</span>
+            <span class="feature-text">AI对话</span>
+          </div>
+          <div class="feature-item">
+            <span class="feature-icon">🎬</span>
+            <span class="feature-text">在线播放</span>
+          </div>
+          <div class="feature-item">
+            <span class="feature-icon">📋</span>
+            <span class="feature-text">一键复制</span>
+          </div>
+        </div>
+
+        <div class="github-section">
+          <p>
+            <span class="github-icon">💻</span>
+            开源项目：<a href="https://github.com/ControlNet/bili-parser" target="_blank" rel="noopener noreferrer">github.com/ControlNet/bili-parser</a>
+          </p>
+        </div>
+      </div>
+
+      <!-- Loading Overlay -->
+      {#if loading}
+        <div class="loading-overlay">
+          <div class="loading-content">
+            <div class="loading-spinner-large"></div>
+            <p class="loading-text">正在获取视频信息...</p>
+          </div>
+        </div>
+      {/if}
+    </div>
+  {/if}
+
   {#if videoInfo.title} 
     <div class="info-display">
       {#if videoInfo.pic}
@@ -361,6 +502,22 @@
       {/if}
       {#if videoInfo.cleanedUrl}
          <p><a href={videoInfo.cleanedUrl} target="_blank" rel="noopener noreferrer">{videoInfo.cleanedUrl}</a></p>
+      {/if}
+
+      <!-- Video Player Section -->
+      {#if videoInfo.bvid}
+        <div class="video-player-section">
+          <h3>🎬 视频播放器</h3>
+          <div class="player-container">
+            <BilibiliPlayer 
+              bvid={videoInfo.bvid} 
+              highQuality={true}
+              danmaku={false}
+              responsive={true}
+              aspectRatio="16:9"
+            />
+          </div>
+        </div>
       {/if}
 
       <!-- Subtitle Section -->
@@ -454,14 +611,14 @@
                           <span class="message-text">{part.text}</span>
                         {/if}
                       {/each}
-                      {#if message.role === 'assistant' && i === chat.messages.length - 1 && chat.isLoading}
+                      {#if message.role === 'assistant' && i === chat.messages.length - 1 && chatLoading}
                         <span class="typing-indicator">▋</span>
                       {/if}
                     </div>
                   </div>
                 {/each}
                 
-                {#if chat.isLoading && chat.messages.length === 0}
+                {#if chatLoading && chat.messages.length === 0}
                   <div class="message assistant">
                     <div class="message-content">
                       <span class="typing-indicator">AI正在思考...</span>
@@ -475,10 +632,10 @@
                   bind:value={chat.input}
                   placeholder="问问AI关于这个视频的任何问题..."
                   class="chat-input"
-                  disabled={chat.isLoading}
+                  disabled={chatLoading}
                 />
-                <button type="submit" class="chat-send" disabled={chat.isLoading || !chat.input.trim()}>
-                  {#if chat.isLoading}
+                <button type="submit" class="chat-send" disabled={chatLoading || !chat.input.trim()}>
+                  {#if chatLoading}
                     <span class="loading-spinner"></span>
                     发送中
                   {:else}
@@ -516,6 +673,35 @@
     border: 1px solid #ccc;
     border-radius: 8px;
     background-color: #f9f9f9;
+  }
+
+  .video-player-section {
+    margin-top: 25px;
+    padding: 20px;
+    background-color: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+  }
+
+  .video-player-section h3 {
+    margin-top: 0;
+    margin-bottom: 15px;
+    color: #495057;
+  }
+
+  .player-container {
+    margin: 15px 0;
+  }
+
+  .player-note {
+    margin-top: 15px;
+    font-size: 0.9rem;
+    color: #6c757d;
+    background-color: #e9ecef;
+    padding: 10px 12px;
+    border-radius: 4px;
+    border-left: 3px solid #17a2b8;
+    margin-bottom: 0;
   }
 
   .input-area {
@@ -714,8 +900,6 @@
     flex: 1;
     padding: 20px;
   }
-
-
 
   .subtitle-button-container {
     text-align: center;
@@ -1027,6 +1211,190 @@
   .chat-send:disabled {
     background-color: #aaa;
     cursor: not-allowed;
+  }
+
+  /* Welcome Section Styles */
+  .welcome-section {
+    margin-top: 25px;
+    padding: 20px;
+    background-color: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    text-align: center;
+    position: relative;
+    transition: filter 0.3s ease;
+  }
+
+  .welcome-section.loading .welcome-content {
+    filter: blur(2px);
+    opacity: 0.6;
+    pointer-events: none;
+  }
+
+  .welcome-content {
+    max-width: 600px;
+    margin: 0 auto;
+  }
+
+  .welcome-icon {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+    animation: float 3s ease-in-out infinite;
+  }
+
+  @keyframes float {
+    0%, 100% { transform: translateY(0px); }
+    50% { transform: translateY(-8px); }
+  }
+
+  .welcome-title {
+    font-size: 1.8rem;
+    margin: 0 0 0.8rem 0;
+    font-weight: 600;
+    color: #495057;
+  }
+
+  .welcome-description {
+    font-size: 1rem;
+    margin: 0 0 2rem 0;
+    color: #6c757d;
+    line-height: 1.5;
+  }
+
+  .feature-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 0.8rem;
+    margin: 2rem 0;
+  }
+
+  .feature-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: white;
+    border: 1px solid #e9ecef;
+    border-radius: 6px;
+    padding: 0.8rem 0.4rem;
+  }
+
+  .feature-icon {
+    font-size: 1.5rem;
+    margin-bottom: 0.4rem;
+  }
+
+  .feature-text {
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: #495057;
+    text-align: center;
+  }
+
+  .github-section {
+    margin-top: 2rem;
+    padding: 1rem;
+    background: white;
+    border: 1px solid #e9ecef;
+    border-radius: 6px;
+  }
+
+  .github-section p {
+    margin: 0;
+    color: #6c757d;
+    font-size: 0.95rem;
+  }
+
+  .github-icon {
+    font-size: 1.2rem;
+    margin-right: 0.5rem;
+  }
+
+  .github-section a {
+    color: #007bff;
+    text-decoration: none;
+    font-weight: 500;
+  }
+
+  .github-section a:hover {
+    text-decoration: underline;
+  }
+
+  /* Loading Overlay Styles */
+  .loading-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255, 255, 255, 0.9);
+    backdrop-filter: blur(1px);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+  }
+
+  .loading-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  .loading-spinner-large {
+    width: 40px;
+    height: 40px;
+    border: 4px solid #e9ecef;
+    border-top: 4px solid #007bff;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+
+  .loading-text {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 500;
+    color: #495057;
+    text-align: center;
+  }
+
+  /* Responsive adjustments */
+  @media (max-width: 768px) {
+    .welcome-section {
+      padding: 15px;
+    }
+    
+    .welcome-title {
+      font-size: 1.5rem;
+    }
+    
+    .welcome-description {
+      font-size: 0.95rem;
+    }
+    
+    .feature-grid {
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.6rem;
+    }
+    
+    .feature-item {
+      padding: 0.6rem 0.3rem;
+    }
+
+    .feature-icon {
+      font-size: 1.3rem;
+    }
+
+    .feature-text {
+      font-size: 0.75rem;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .feature-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
   }
 
 </style> 

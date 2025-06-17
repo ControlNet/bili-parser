@@ -7,4 +7,4 @@
   <meta name="description" content="Parse Bilibili video links and display information" />
 </svelte:head>
 
-<BiliInfo />
+<BiliInfo initialBvid={undefined} />
