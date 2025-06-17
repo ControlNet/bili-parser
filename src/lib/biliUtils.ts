@@ -334,7 +334,12 @@ function escapeHtml(text: string): string {
   return div.innerHTML;
 }
 
-// Function to convert image URL to base64 data URI (similar to Python implementation)
+// Constants for image resizing (matching Python implementation)
+const MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
+const RESIZE_FACTOR = 0.8; // Reduce by 20% each time
+const MIN_DIMENSION = 100; // Don't resize image dimensions below this
+
+// Function to convert image URL to base64 data URI with intelligent resizing (similar to Python implementation)
 export async function loadImageAsDataUri(imageUrl: string): Promise<string> {
   try {
     // Use a proxy to avoid CORS issues with Bilibili images
@@ -348,12 +353,71 @@ export async function loadImageAsDataUri(imageUrl: string): Promise<string> {
 
     const blob = await response.blob();
     
-    // Convert blob to base64
+    // Create image element to get dimensions and process
+    const img = new Image();
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    
+    if (!ctx) {
+      console.warn('Canvas context not available');
+      return '';
+    }
+
     return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
+      img.onload = () => {
+        try {
+          let currentWidth = img.naturalWidth;
+          let currentHeight = img.naturalHeight;
+          
+          // Start with original size
+          canvas.width = currentWidth;
+          canvas.height = currentHeight;
+          ctx.drawImage(img, 0, 0);
+          
+          // Convert to PNG and check size
+          let dataUrl = canvas.toDataURL('image/png');
+          let currentSizeBytes = Math.round((dataUrl.length - 'data:image/png;base64,'.length) * 3/4);
+          
+          // Resize if too large (matching Python logic)
+          while (currentSizeBytes > MAX_IMAGE_SIZE_BYTES && 
+                 currentWidth * RESIZE_FACTOR >= MIN_DIMENSION && 
+                 currentHeight * RESIZE_FACTOR >= MIN_DIMENSION) {
+            
+            console.log(`Image from ${imageUrl} is too large (${(currentSizeBytes/(1024*1024)).toFixed(2)} MB). Resizing...`);
+            
+            currentWidth = Math.floor(currentWidth * RESIZE_FACTOR);
+            currentHeight = Math.floor(currentHeight * RESIZE_FACTOR);
+            
+            // Resize canvas and redraw
+            canvas.width = currentWidth;
+            canvas.height = currentHeight;
+            ctx.drawImage(img, 0, 0, currentWidth, currentHeight);
+            
+            // Get new data URL and size
+            dataUrl = canvas.toDataURL('image/png');
+            currentSizeBytes = Math.round((dataUrl.length - 'data:image/png;base64,'.length) * 3/4);
+            
+            console.log(`Resized to ${currentWidth}x${currentHeight}, new PNG size: ${(currentSizeBytes/(1024*1024)).toFixed(2)} MB`);
+          }
+          
+          if (currentSizeBytes > MAX_IMAGE_SIZE_BYTES) {
+            console.log(`Warning: Image from ${imageUrl} still too large (${(currentSizeBytes/(1024*1024)).toFixed(2)} MB) after resizing. Proceeding.`);
+          }
+          
+          resolve(dataUrl);
+        } catch (error) {
+          console.warn(`Error processing image ${imageUrl}:`, error);
+          resolve('');
+        }
+      };
+      
+      img.onerror = () => {
+        console.warn(`Error loading image for processing: ${imageUrl}`);
+        resolve('');
+      };
+      
+      // Load image from blob
+      img.src = URL.createObjectURL(blob);
     });
   } catch (error) {
     console.warn(`Error loading image ${imageUrl}:`, error);
