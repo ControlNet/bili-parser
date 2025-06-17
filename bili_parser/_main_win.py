@@ -124,11 +124,11 @@ def set_clipboard_text_and_image(*segments: list[Segment]):
                     # Sanitize text for HTML: replace newlines with <br>, escape HTML special chars if necessary
                     # For now, just simple paragraph, assuming text is relatively clean.
                     processed_text = text.strip().replace("\\n", "<br>") 
-                    html_contents.append(f'<p>{processed_text}</p>')
+                    html_contents.append(f'<div style="margin:0;padding:0;">{processed_text}</div>')
                 case Image(image_url_from_segment):
                     loaded_image_src = load_image(image_url_from_segment)
                     if loaded_image_src:
-                        html_contents.append(f'<img src="{loaded_image_src}" />')
+                        html_contents.append(f'<div style="margin:0;padding:0;"><img src="{loaded_image_src}" style="display:block;" /></div>')
                     else:
                         print(f"Skipping image segment due to loading error from URL: {image_url_from_segment}")
         
