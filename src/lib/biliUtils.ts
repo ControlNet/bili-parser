@@ -285,4 +285,124 @@ ${watchingTotalText}
 ${videoInfo.cleanedUrl}
   `.trim();
   return textToCopy;
+}
+
+// New function to format video info as HTML with embedded images for rich clipboard copying
+export function formatVideoInfoForRichCopy(videoInfo: VideoInfoShape): string {
+  if (!videoInfo || !videoInfo.title) {
+    return 'No video information available to format.';
+  }
+
+  const upFansText = (videoInfo.upFans && videoInfo.upFans !== 'N/A' && videoInfo.upFans !== '') ? ` 粉丝: ${videoInfo.upFans}` : '';
+  const watchingWebText = (videoInfo.watchingWeb && videoInfo.watchingWeb !== 'N/A' && videoInfo.watchingWeb !== '') ? `，${videoInfo.watchingWeb} 人在网页端观看` : '';
+  const watchingTotalText = (videoInfo.watchingTotal && videoInfo.watchingTotal !== 'N/A' && videoInfo.watchingTotal !== '') ? `🏄‍♂️ 总共 ${videoInfo.watchingTotal} 人在观看${watchingWebText}` : '';
+
+  // Format exactly like Python version: Text1 + Image + Text2
+  const text1 = `标题: ${videoInfo.title}<br/>UP主: ${videoInfo.upName}${upFansText}`;
+  
+  const text2Parts = [
+    `👀播放: ${videoInfo.views} 💬弹幕: ${videoInfo.danmaku}`,
+    `👍点赞: ${videoInfo.likes} 💰投币: ${videoInfo.coins}`,
+    `📁收藏: ${videoInfo.favorites} 🔗分享: ${videoInfo.shares}`,
+    `📝简介: ${videoInfo.description || '无'}`
+  ];
+  
+  if (watchingTotalText) {
+    text2Parts.push(watchingTotalText);
+  }
+  
+  text2Parts.push(`<a href="${videoInfo.cleanedUrl}" style="color: #007bff; text-decoration: none;">${videoInfo.cleanedUrl}</a>`);
+  
+  const text2 = text2Parts.join('<br/>');
+
+  // Combine with image in the middle (like Python implementation)
+  const parts = [text1];
+  
+  if (videoInfo.pic) {
+    parts.push(`<img src="${videoInfo.pic}" alt="Video Thumbnail" style="max-width: 300px; height: auto; border-radius: 8px; display: block; margin: 10px 0;" referrerpolicy="no-referrer" />`);
+  }
+  
+  parts.push(text2);
+
+  return `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; line-height: 1.4;">${parts.join('<br/>')}</div>`;
+}
+
+// Helper function to escape HTML special characters
+function escapeHtml(text: string): string {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// Function to convert image URL to base64 data URI (similar to Python implementation)
+export async function loadImageAsDataUri(imageUrl: string): Promise<string> {
+  try {
+    // Use a proxy to avoid CORS issues with Bilibili images
+    const proxyUrl = `/api/image-proxy?url=${encodeURIComponent(imageUrl)}`;
+    const response = await fetch(proxyUrl);
+    
+    if (!response.ok) {
+      console.warn(`Failed to load image: ${imageUrl}`);
+      return '';
+    }
+
+    const blob = await response.blob();
+    
+    // Convert blob to base64
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  } catch (error) {
+    console.warn(`Error loading image ${imageUrl}:`, error);
+    return '';
+  }
+}
+
+// Enhanced function to format video info as HTML with base64 embedded images
+export async function formatVideoInfoForRichCopyWithEmbeddedImages(videoInfo: VideoInfoShape): Promise<string> {
+  if (!videoInfo || !videoInfo.title) {
+    return 'No video information available to format.';
+  }
+
+  const upFansText = (videoInfo.upFans && videoInfo.upFans !== 'N/A' && videoInfo.upFans !== '') ? ` 粉丝: ${videoInfo.upFans}` : '';
+  const watchingWebText = (videoInfo.watchingWeb && videoInfo.watchingWeb !== 'N/A' && videoInfo.watchingWeb !== '') ? `，${videoInfo.watchingWeb} 人在网页端观看` : '';
+  const watchingTotalText = (videoInfo.watchingTotal && videoInfo.watchingTotal !== 'N/A' && videoInfo.watchingTotal !== '') ? `🏄‍♂️ 总共 ${videoInfo.watchingTotal} 人在观看${watchingWebText}` : '';
+
+  // Load image as base64 data URI if available
+  let imageDataUri = '';
+  if (videoInfo.pic) {
+    imageDataUri = await loadImageAsDataUri(videoInfo.pic);
+  }
+
+  // Format exactly like Python version: Text1 + Image + Text2
+  const text1 = `标题: ${videoInfo.title}<br/>UP主: ${videoInfo.upName}${upFansText}`;
+  
+  const text2Parts = [
+    `👀播放: ${videoInfo.views} 💬弹幕: ${videoInfo.danmaku}`,
+    `👍点赞: ${videoInfo.likes} 💰投币: ${videoInfo.coins}`,
+    `📁收藏: ${videoInfo.favorites} 🔗分享: ${videoInfo.shares}`,
+    `📝简介: ${videoInfo.description || '无'}`
+  ];
+  
+  if (watchingTotalText) {
+    text2Parts.push(watchingTotalText);
+  }
+  
+  text2Parts.push(`<a href="${videoInfo.cleanedUrl}" style="color: #007bff; text-decoration: none;">${videoInfo.cleanedUrl}</a>`);
+  
+  const text2 = text2Parts.join('<br/>');
+
+  // Combine with embedded image in the middle (like Python implementation)
+  const parts = [text1];
+  
+  if (imageDataUri) {
+    parts.push(`<img src="${imageDataUri}" alt="Video Thumbnail" style="max-width: 300px; height: auto; border-radius: 8px; display: block; margin: 10px 0;" />`);
+  }
+  
+  parts.push(text2);
+
+  return `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; line-height: 1.4;">${parts.join('<br/>')}</div>`;
 } 

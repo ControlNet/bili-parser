@@ -2,6 +2,8 @@
   import {
     getVideoInfo,
     formatVideoInfoForCopy,
+    formatVideoInfoForRichCopy,
+    formatVideoInfoForRichCopyWithEmbeddedImages,
     fetchSubtitles,
     generateVideoSummary,
     type VideoInfoShape,
@@ -372,21 +374,60 @@
       alert('没有可复制的信息。');
       return;
     }
-    const textToCopy = formatVideoInfoForCopy(videoInfo as VideoInfoShape);
+
+    copyButtonText = '处理中...';
 
     try {
-      await navigator.clipboard.writeText(textToCopy);
+      // Check if browser supports rich clipboard
+      if (!navigator.clipboard.write) {
+        throw new Error('浏览器不支持富文本复制功能');
+      }
+
+      // Generate HTML content with embedded images
+      const htmlContent = await formatVideoInfoForRichCopyWithEmbeddedImages(videoInfo as VideoInfoShape);
+      const plainTextContent = formatVideoInfoForCopy(videoInfo as VideoInfoShape);
+
+      // Create clipboard items with both HTML and plain text
+      const clipboardItems = [
+        new ClipboardItem({
+          'text/html': new Blob([htmlContent], { type: 'text/html' }),
+          'text/plain': new Blob([plainTextContent], { type: 'text/plain' })
+        })
+      ];
+
+      await navigator.clipboard.write(clipboardItems);
       copyButtonText = '已复制!';
       setTimeout(() => {
         copyButtonText = '复制信息';
       }, 2000);
     } catch (err) {
-      console.error('无法复制文本: ', err);
-      alert('复制失败，请检查浏览器权限或手动复制。');
-      copyButtonText = '复制失败';
-      setTimeout(() => {
-        copyButtonText = '复制信息';
-      }, 2000);
+      console.error('无法复制富文本: ', err);
+      
+      // Fallback to simple HTML copy without embedded images
+      try {
+        const simpleHtmlContent = formatVideoInfoForRichCopy(videoInfo as VideoInfoShape);
+        const plainTextContent = formatVideoInfoForCopy(videoInfo as VideoInfoShape);
+        
+        const clipboardItems = [
+          new ClipboardItem({
+            'text/html': new Blob([simpleHtmlContent], { type: 'text/html' }),
+            'text/plain': new Blob([plainTextContent], { type: 'text/plain' })
+          })
+        ];
+
+        await navigator.clipboard.write(clipboardItems);
+        copyButtonText = '已复制!';
+        setTimeout(() => {
+          copyButtonText = '复制信息';
+        }, 2000);
+      } catch (fallbackErr) {
+        console.error('富文本复制失败，尝试普通文本复制: ', fallbackErr);
+        alert('富文本复制失败，请检查浏览器权限或使用普通复制功能。');
+        copyButtonText = '复制失败';
+        setTimeout(() => {
+          copyButtonText = '复制信息';
+        }, 2000);
+      }
     }
   }
 </script>
