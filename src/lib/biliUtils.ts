@@ -67,81 +67,103 @@ async function fetchBiliApiViaProxy(targetApiUrl: string, fetchFn: typeof fetch)
   const response = await fetchFn(proxyUrl);
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({ message: response.statusText }));
-    throw new Error(`Proxied Bilibili API request to ${targetApiUrl} failed (${response.status}): ${errorData.message || response.statusText}`);
+    throw new Error(
+      `Proxied Bilibili API request to ${targetApiUrl} failed (${response.status}): ${errorData.message || response.statusText}`
+    );
   }
   return response.json();
 }
 
-async function resolveB23Url(shortUrlInput: string, fetchFn: typeof fetch, isFromServerContext: boolean): Promise<string | null> {
-    let targetB23Url = shortUrlInput;
-    // Ensure it's a full URL for fetching, default to https
-    if (!targetB23Url.match(/^https?:\/\//)) {
-        targetB23Url = 'https://' + targetB23Url.replace(/^b23.tv\//, ''); // Handle cases like b23.tv/xxxx
-        if (!targetB23Url.startsWith('https://b23.tv')) { // if original was just code, prepend host
-             targetB23Url = 'https://b23.tv/' + shortUrlInput.split('/').pop();
-        }
+async function resolveB23Url(
+  shortUrlInput: string,
+  fetchFn: typeof fetch,
+  isFromServerContext: boolean
+): Promise<string | null> {
+  let targetB23Url = shortUrlInput;
+  // Ensure it's a full URL for fetching, default to https
+  if (!targetB23Url.match(/^https?:\/\//)) {
+    targetB23Url = 'https://' + targetB23Url.replace(/^b23.tv\//, ''); // Handle cases like b23.tv/xxxx
+    if (!targetB23Url.startsWith('https://b23.tv')) {
+      // if original was just code, prepend host
+      targetB23Url = 'https://b23.tv/' + shortUrlInput.split('/').pop();
     }
-    if (!targetB23Url.includes('b23.tv/')) {
-        console.warn("resolveB23Url called with non-b23.tv URL:", targetB23Url);
-        return shortUrlInput; // Return original if it doesn't seem like a b23.tv link to be resolved
-    }
+  }
+  if (!targetB23Url.includes('b23.tv/')) {
+    console.warn('resolveB23Url called with non-b23.tv URL:', targetB23Url);
+    return shortUrlInput; // Return original if it doesn't seem like a b23.tv link to be resolved
+  }
 
-    try {
-        let resolvedLocation: string | null = null;
-        if (isFromServerContext) {
-            const response = await fetchFn(targetB23Url, { redirect: 'manual' });
-            if (response.status === 301 || response.status === 302) {
-                resolvedLocation = response.headers.get('Location');
-            } else {
-                console.error(`b23.tv direct fetch did not redirect. Status: ${response.status} for ${targetB23Url}`);
-                return null;
-            }
-        } else {
-            // Client-side uses the /api/b23 proxy with 'url' parameter
-            const proxyResolveUrl = `/api/b23?url=${encodeURIComponent(targetB23Url)}`; // Updated path and parameter
-            const response = await fetchFn(proxyResolveUrl);
-            if (!response.ok) {
-                const errorText = await response.text().catch(() => `Resolve proxy failed with status ${response.status}`);
-                console.error(`Error resolving b23.tv link via /api/b23 for ${targetB23Url}: ${errorText}`); // Updated path in log
-                return null;
-            }
-            const data = await response.json();
-            resolvedLocation = data.location;
-        }
-        return resolvedLocation || null;
-    } catch (error) {
-        console.error(`Failed to resolve b23.tv link ${targetB23Url}:`, error);
+  try {
+    let resolvedLocation: string | null = null;
+    if (isFromServerContext) {
+      const response = await fetchFn(targetB23Url, { redirect: 'manual' });
+      if (response.status === 301 || response.status === 302) {
+        resolvedLocation = response.headers.get('Location');
+      } else {
+        console.error(
+          `b23.tv direct fetch did not redirect. Status: ${response.status} for ${targetB23Url}`
+        );
         return null;
+      }
+    } else {
+      // Client-side uses the /api/b23 proxy with 'url' parameter
+      const proxyResolveUrl = `/api/b23?url=${encodeURIComponent(targetB23Url)}`; // Updated path and parameter
+      const response = await fetchFn(proxyResolveUrl);
+      if (!response.ok) {
+        const errorText = await response
+          .text()
+          .catch(() => `Resolve proxy failed with status ${response.status}`);
+        console.error(`Error resolving b23.tv link via /api/b23 for ${targetB23Url}: ${errorText}`); // Updated path in log
+        return null;
+      }
+      const data = await response.json();
+      resolvedLocation = data.location;
     }
+    return resolvedLocation || null;
+  } catch (error) {
+    console.error(`Failed to resolve b23.tv link ${targetB23Url}:`, error);
+    return null;
+  }
 }
 
-export async function getVideoInfo(initialUrl: string, fetchFn: typeof fetch, isFromServerContext: boolean): Promise<VideoInfoShape> {
+export async function getVideoInfo(
+  initialUrl: string,
+  fetchFn: typeof fetch,
+  isFromServerContext: boolean
+): Promise<VideoInfoShape> {
   let urlToParse = initialUrl;
 
   // Check for b23.tv short link pattern or if it's a full b23.tv URL
-  if (initialUrl.includes('b23.tv/') || initialUrl.match(/^b23.tv\/[a-zA-Z0-9]+$/) || initialUrl.match(/^[a-zA-Z0-9]+$/) && initialUrl.length < 15 ) { // Heuristic for short b23 codes
+  if (
+    initialUrl.includes('b23.tv/') ||
+    initialUrl.match(/^b23.tv\/[a-zA-Z0-9]+$/) ||
+    (initialUrl.match(/^[a-zA-Z0-9]+$/) && initialUrl.length < 15)
+  ) {
+    // Heuristic for short b23 codes
     // Attempt to make it a full URL if just a code like `4d0kOyh` was passed, assuming it's from b23.tv
     let potentialB23Url = initialUrl;
     if (!initialUrl.includes('b23.tv/')) {
-        potentialB23Url = `https://b23.tv/${initialUrl}`;
+      potentialB23Url = `https://b23.tv/${initialUrl}`;
     }
     const resolved = await resolveB23Url(potentialB23Url, fetchFn, isFromServerContext);
     if (resolved) {
-        urlToParse = resolved;
+      urlToParse = resolved;
     } else {
-        // If resolution fails but it looked like a b23 link, throw an error.
-        // If it didn't look like one, urlToParse remains initialUrl and extractBvid will handle it.
-        if (initialUrl.includes('b23.tv/')) {
-             throw new Error(`Failed to resolve b23.tv short link: ${initialUrl}`);
-        }
-        // Otherwise, proceed with initialUrl, extractBvid will try its best
+      // If resolution fails but it looked like a b23 link, throw an error.
+      // If it didn't look like one, urlToParse remains initialUrl and extractBvid will handle it.
+      if (initialUrl.includes('b23.tv/')) {
+        throw new Error(`Failed to resolve b23.tv short link: ${initialUrl}`);
+      }
+      // Otherwise, proceed with initialUrl, extractBvid will try its best
     }
   }
 
   const bvid = extractBvid(urlToParse);
 
   if (!bvid) {
-    throw new Error(`Could not extract BVID from URL: ${urlToParse} (original input: ${initialUrl})`);
+    throw new Error(
+      `Could not extract BVID from URL: ${urlToParse} (original input: ${initialUrl})`
+    );
   }
 
   const videoInfo: Partial<VideoInfoShape> = { bvid, watchingWeb: 'N/A' };
@@ -176,11 +198,17 @@ export async function getVideoInfo(initialUrl: string, fetchFn: typeof fetch, is
       if (relationData.code === 0) {
         videoInfo.upFans = formatNumber(relationData.data.follower);
       } else {
-        console.warn(`Bilibili Relation API warning for mid ${videoInfo.upMid} (bvid ${bvid}):`, relationData.message);
+        console.warn(
+          `Bilibili Relation API warning for mid ${videoInfo.upMid} (bvid ${bvid}):`,
+          relationData.message
+        );
         videoInfo.upFans = 'N/A';
       }
     } catch (relationError: any) {
-      console.warn(`Failed to fetch fan count for mid ${videoInfo.upMid} (bvid ${bvid}):`, relationError.message);
+      console.warn(
+        `Failed to fetch fan count for mid ${videoInfo.upMid} (bvid ${bvid}):`,
+        relationError.message
+      );
       videoInfo.upFans = 'N/A';
     }
   } else {
@@ -194,7 +222,9 @@ export async function getVideoInfo(initialUrl: string, fetchFn: typeof fetch, is
       const onlineData = await fetchBiliApiViaProxy(targetOnlineApiUrl, fetchFn);
       if (onlineData.code === 0 && onlineData.data) {
         videoInfo.watchingTotal = formatNumber(onlineData.data.total);
-        videoInfo.watchingWeb = onlineData.data.web_online ? formatNumber(onlineData.data.web_online) : (onlineData.data.count || 'N/A');
+        videoInfo.watchingWeb = onlineData.data.web_online
+          ? formatNumber(onlineData.data.web_online)
+          : onlineData.data.count || 'N/A';
       } else {
         console.warn(`Bilibili Online API warning for bvid ${bvid}:`, onlineData.message);
         videoInfo.watchingTotal = 'N/A';
@@ -210,7 +240,11 @@ export async function getVideoInfo(initialUrl: string, fetchFn: typeof fetch, is
 }
 
 // Function to fetch subtitles for a video
-export async function fetchSubtitles(bvid: string, cid: string | number, fetchFn: typeof fetch): Promise<SubtitleData> {
+export async function fetchSubtitles(
+  bvid: string,
+  cid: string | number,
+  fetchFn: typeof fetch
+): Promise<SubtitleData> {
   const response = await fetchFn('/api/subtitles', {
     method: 'POST',
     headers: {
@@ -221,44 +255,52 @@ export async function fetchSubtitles(bvid: string, cid: string | number, fetchFn
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({ message: response.statusText }));
-    throw new Error(`Failed to fetch subtitles (${response.status}): ${errorData.message || response.statusText}`);
+    throw new Error(
+      `Failed to fetch subtitles (${response.status}): ${errorData.message || response.statusText}`
+    );
   }
 
   const data = await response.json();
-  
+
   // Transform the Whisper ASR response to our format
   return {
     text: data.subtitles.text || '',
-    segments: data.subtitles.segments?.map((segment: any) => ({
-      start: segment.start,
-      end: segment.end,
-      text: segment.text,
-      words: segment.words?.map((word: any) => ({
-        start: word.start,
-        end: word.end,
-        word: word.word,
-        probability: word.probability
-      }))
-    })) || []
+    segments:
+      data.subtitles.segments?.map((segment: any) => ({
+        start: segment.start,
+        end: segment.end,
+        text: segment.text,
+        words: segment.words?.map((word: any) => ({
+          start: word.start,
+          end: word.end,
+          word: word.word,
+          probability: word.probability
+        }))
+      })) || []
   };
 }
 
 // Function to generate video summary using AI
-export async function generateVideoSummary(videoInfo: VideoInfoShape, fetchFn: typeof fetch): Promise<string> {
+export async function generateVideoSummary(
+  videoInfo: VideoInfoShape,
+  fetchFn: typeof fetch
+): Promise<string> {
   const response = await fetchFn('/api/summarize', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify({ 
-      videoInfo, 
-      subtitles: videoInfo.subtitles 
+    body: JSON.stringify({
+      videoInfo,
+      subtitles: videoInfo.subtitles
     })
   });
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({ message: response.statusText }));
-    throw new Error(`Failed to generate summary (${response.status}): ${errorData.message || response.statusText}`);
+    throw new Error(
+      `Failed to generate summary (${response.status}): ${errorData.message || response.statusText}`
+    );
   }
 
   const data = await response.json();
@@ -270,9 +312,18 @@ export function formatVideoInfoForCopy(videoInfo: VideoInfoShape): string {
     return 'No video information available to format.';
   }
 
-  const upFansText = (videoInfo.upFans && videoInfo.upFans !== 'N/A' && videoInfo.upFans !== '') ? ` 粉丝: ${videoInfo.upFans}` : '';
-  const watchingWebText = (videoInfo.watchingWeb && videoInfo.watchingWeb !== 'N/A' && videoInfo.watchingWeb !== '') ? `，${videoInfo.watchingWeb} 人在网页端观看` : '';
-  const watchingTotalText = (videoInfo.watchingTotal && videoInfo.watchingTotal !== 'N/A' && videoInfo.watchingTotal !== '') ? `🏄‍♂️ 总共 ${videoInfo.watchingTotal} 人在观看${watchingWebText}` : '';
+  const upFansText =
+    videoInfo.upFans && videoInfo.upFans !== 'N/A' && videoInfo.upFans !== ''
+      ? ` 粉丝: ${videoInfo.upFans}`
+      : '';
+  const watchingWebText =
+    videoInfo.watchingWeb && videoInfo.watchingWeb !== 'N/A' && videoInfo.watchingWeb !== ''
+      ? `，${videoInfo.watchingWeb} 人在网页端观看`
+      : '';
+  const watchingTotalText =
+    videoInfo.watchingTotal && videoInfo.watchingTotal !== 'N/A' && videoInfo.watchingTotal !== ''
+      ? `🏄‍♂️ 总共 ${videoInfo.watchingTotal} 人在观看${watchingWebText}`
+      : '';
 
   const textToCopy = `
 标题: ${videoInfo.title}
@@ -293,35 +344,48 @@ export function formatVideoInfoForRichCopy(videoInfo: VideoInfoShape): string {
     return 'No video information available to format.';
   }
 
-  const upFansText = (videoInfo.upFans && videoInfo.upFans !== 'N/A' && videoInfo.upFans !== '') ? ` 粉丝: ${videoInfo.upFans}` : '';
-  const watchingWebText = (videoInfo.watchingWeb && videoInfo.watchingWeb !== 'N/A' && videoInfo.watchingWeb !== '') ? `，${videoInfo.watchingWeb} 人在网页端观看` : '';
-  const watchingTotalText = (videoInfo.watchingTotal && videoInfo.watchingTotal !== 'N/A' && videoInfo.watchingTotal !== '') ? `🏄‍♂️ 总共 ${videoInfo.watchingTotal} 人在观看${watchingWebText}` : '';
+  const upFansText =
+    videoInfo.upFans && videoInfo.upFans !== 'N/A' && videoInfo.upFans !== ''
+      ? ` 粉丝: ${videoInfo.upFans}`
+      : '';
+  const watchingWebText =
+    videoInfo.watchingWeb && videoInfo.watchingWeb !== 'N/A' && videoInfo.watchingWeb !== ''
+      ? `，${videoInfo.watchingWeb} 人在网页端观看`
+      : '';
+  const watchingTotalText =
+    videoInfo.watchingTotal && videoInfo.watchingTotal !== 'N/A' && videoInfo.watchingTotal !== ''
+      ? `🏄‍♂️ 总共 ${videoInfo.watchingTotal} 人在观看${watchingWebText}`
+      : '';
 
   // Format exactly like Python version: Text1 + Image + Text2
   const text1 = `标题: ${videoInfo.title}<br/>UP主: ${videoInfo.upName}${upFansText}`;
-  
+
   const text2Parts = [
     `👀播放: ${videoInfo.views} 💬弹幕: ${videoInfo.danmaku}`,
     `👍点赞: ${videoInfo.likes} 💰投币: ${videoInfo.coins}`,
     `📁收藏: ${videoInfo.favorites} 🔗分享: ${videoInfo.shares}`,
     `📝简介: ${videoInfo.description || '无'}`
   ];
-  
+
   if (watchingTotalText) {
     text2Parts.push(watchingTotalText);
   }
-  
-  text2Parts.push(`<a href="${videoInfo.cleanedUrl}" style="color: #007bff; text-decoration: none;">${videoInfo.cleanedUrl}</a>`);
-  
+
+  text2Parts.push(
+    `<a href="${videoInfo.cleanedUrl}" style="color: #007bff; text-decoration: none;">${videoInfo.cleanedUrl}</a>`
+  );
+
   const text2 = text2Parts.join('<br/>');
 
   // Combine with image in the middle (like Python implementation)
   const parts = [text1];
-  
+
   if (videoInfo.pic) {
-    parts.push(`<img src="${videoInfo.pic}" alt="Video Thumbnail" style="max-width: 300px; height: auto; border-radius: 8px; display: block; margin: 10px 0;" referrerpolicy="no-referrer" />`);
+    parts.push(
+      `<img src="${videoInfo.pic}" alt="Video Thumbnail" style="max-width: 300px; height: auto; border-radius: 8px; display: block; margin: 10px 0;" referrerpolicy="no-referrer" />`
+    );
   }
-  
+
   parts.push(text2);
 
   return `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; line-height: 1.4;">${parts.join('<br/>')}</div>`;
@@ -345,19 +409,19 @@ export async function loadImageAsDataUri(imageUrl: string): Promise<string> {
     // Use a proxy to avoid CORS issues with Bilibili images
     const proxyUrl = `/api/image-proxy?url=${encodeURIComponent(imageUrl)}`;
     const response = await fetch(proxyUrl);
-    
+
     if (!response.ok) {
       console.warn(`Failed to load image: ${imageUrl}`);
       return '';
     }
 
     const blob = await response.blob();
-    
+
     // Create image element to get dimensions and process
     const img = new Image();
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
-    
+
     if (!ctx) {
       console.warn('Canvas context not available');
       return '';
@@ -368,54 +432,65 @@ export async function loadImageAsDataUri(imageUrl: string): Promise<string> {
         try {
           let currentWidth = img.naturalWidth;
           let currentHeight = img.naturalHeight;
-          
+
           // Start with original size
           canvas.width = currentWidth;
           canvas.height = currentHeight;
           ctx.drawImage(img, 0, 0);
-          
+
           // Convert to PNG and check size
           let dataUrl = canvas.toDataURL('image/png');
-          let currentSizeBytes = Math.round((dataUrl.length - 'data:image/png;base64,'.length) * 3/4);
-          
+          let currentSizeBytes = Math.round(
+            ((dataUrl.length - 'data:image/png;base64,'.length) * 3) / 4
+          );
+
           // Resize if too large (matching Python logic)
-          while (currentSizeBytes > MAX_IMAGE_SIZE_BYTES && 
-                 currentWidth * RESIZE_FACTOR >= MIN_DIMENSION && 
-                 currentHeight * RESIZE_FACTOR >= MIN_DIMENSION) {
-            
-            console.log(`Image from ${imageUrl} is too large (${(currentSizeBytes/(1024*1024)).toFixed(2)} MB). Resizing...`);
-            
+          while (
+            currentSizeBytes > MAX_IMAGE_SIZE_BYTES &&
+            currentWidth * RESIZE_FACTOR >= MIN_DIMENSION &&
+            currentHeight * RESIZE_FACTOR >= MIN_DIMENSION
+          ) {
+            console.log(
+              `Image from ${imageUrl} is too large (${(currentSizeBytes / (1024 * 1024)).toFixed(2)} MB). Resizing...`
+            );
+
             currentWidth = Math.floor(currentWidth * RESIZE_FACTOR);
             currentHeight = Math.floor(currentHeight * RESIZE_FACTOR);
-            
+
             // Resize canvas and redraw
             canvas.width = currentWidth;
             canvas.height = currentHeight;
             ctx.drawImage(img, 0, 0, currentWidth, currentHeight);
-            
+
             // Get new data URL and size
             dataUrl = canvas.toDataURL('image/png');
-            currentSizeBytes = Math.round((dataUrl.length - 'data:image/png;base64,'.length) * 3/4);
-            
-            console.log(`Resized to ${currentWidth}x${currentHeight}, new PNG size: ${(currentSizeBytes/(1024*1024)).toFixed(2)} MB`);
+            currentSizeBytes = Math.round(
+              ((dataUrl.length - 'data:image/png;base64,'.length) * 3) / 4
+            );
+
+            console.log(
+              `Resized to ${currentWidth}x${currentHeight}, new PNG size: ${(currentSizeBytes / (1024 * 1024)).toFixed(2)} MB`
+            );
           }
-          
+
           if (currentSizeBytes > MAX_IMAGE_SIZE_BYTES) {
-            console.log(`Warning: Image from ${imageUrl} still too large (${(currentSizeBytes/(1024*1024)).toFixed(2)} MB) after resizing. Proceeding.`);
+            console.log(
+              `Warning: Image from ${imageUrl} still too large (${(currentSizeBytes / (1024 * 1024)).toFixed(2)} MB) after resizing. Proceeding.`
+            );
           }
-          
+
           resolve(dataUrl);
         } catch (error) {
           console.warn(`Error processing image ${imageUrl}:`, error);
           resolve('');
         }
       };
-      
+
       img.onerror = () => {
         console.warn(`Error loading image for processing: ${imageUrl}`);
         resolve('');
       };
-      
+
       // Load image from blob
       img.src = URL.createObjectURL(blob);
     });
@@ -426,14 +501,25 @@ export async function loadImageAsDataUri(imageUrl: string): Promise<string> {
 }
 
 // Enhanced function to format video info as HTML with base64 embedded images
-export async function formatVideoInfoForRichCopyWithEmbeddedImages(videoInfo: VideoInfoShape): Promise<string> {
+export async function formatVideoInfoForRichCopyWithEmbeddedImages(
+  videoInfo: VideoInfoShape
+): Promise<string> {
   if (!videoInfo || !videoInfo.title) {
     return 'No video information available to format.';
   }
 
-  const upFansText = (videoInfo.upFans && videoInfo.upFans !== 'N/A' && videoInfo.upFans !== '') ? ` 粉丝: ${videoInfo.upFans}` : '';
-  const watchingWebText = (videoInfo.watchingWeb && videoInfo.watchingWeb !== 'N/A' && videoInfo.watchingWeb !== '') ? `，${videoInfo.watchingWeb} 人在网页端观看` : '';
-  const watchingTotalText = (videoInfo.watchingTotal && videoInfo.watchingTotal !== 'N/A' && videoInfo.watchingTotal !== '') ? `🏄‍♂️ 总共 ${videoInfo.watchingTotal} 人在观看${watchingWebText}` : '';
+  const upFansText =
+    videoInfo.upFans && videoInfo.upFans !== 'N/A' && videoInfo.upFans !== ''
+      ? ` 粉丝: ${videoInfo.upFans}`
+      : '';
+  const watchingWebText =
+    videoInfo.watchingWeb && videoInfo.watchingWeb !== 'N/A' && videoInfo.watchingWeb !== ''
+      ? `，${videoInfo.watchingWeb} 人在网页端观看`
+      : '';
+  const watchingTotalText =
+    videoInfo.watchingTotal && videoInfo.watchingTotal !== 'N/A' && videoInfo.watchingTotal !== ''
+      ? `🏄‍♂️ 总共 ${videoInfo.watchingTotal} 人在观看${watchingWebText}`
+      : '';
 
   // Load image as base64 data URI if available
   let imageDataUri = '';
@@ -443,30 +529,34 @@ export async function formatVideoInfoForRichCopyWithEmbeddedImages(videoInfo: Vi
 
   // Format exactly like Python version: Text1 + Image + Text2
   const text1 = `标题: ${videoInfo.title}<br/>UP主: ${videoInfo.upName}${upFansText}`;
-  
+
   const text2Parts = [
     `👀播放: ${videoInfo.views} 💬弹幕: ${videoInfo.danmaku}`,
     `👍点赞: ${videoInfo.likes} 💰投币: ${videoInfo.coins}`,
     `📁收藏: ${videoInfo.favorites} 🔗分享: ${videoInfo.shares}`,
     `📝简介: ${videoInfo.description || '无'}`
   ];
-  
+
   if (watchingTotalText) {
     text2Parts.push(watchingTotalText);
   }
-  
-  text2Parts.push(`<a href="${videoInfo.cleanedUrl}" style="color: #007bff; text-decoration: none;">${videoInfo.cleanedUrl}</a>`);
-  
+
+  text2Parts.push(
+    `<a href="${videoInfo.cleanedUrl}" style="color: #007bff; text-decoration: none;">${videoInfo.cleanedUrl}</a>`
+  );
+
   const text2 = text2Parts.join('<br/>');
 
   // Combine with embedded image in the middle (like Python implementation)
   const parts = [text1];
-  
+
   if (imageDataUri) {
-    parts.push(`<img src="${imageDataUri}" alt="Video Thumbnail" style="max-width: 300px; height: auto; border-radius: 8px; display: block; margin: 10px 0;" />`);
+    parts.push(
+      `<img src="${imageDataUri}" alt="Video Thumbnail" style="max-width: 300px; height: auto; border-radius: 8px; display: block; margin: 10px 0;" />`
+    );
   }
-  
+
   parts.push(text2);
 
   return `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; line-height: 1.4;">${parts.join('<br/>')}</div>`;
-} 
+}

@@ -20,12 +20,13 @@ function convertSubtitlesToSimplified(subtitleData: any): any {
       ...segment,
       text: segment.text ? toSimplified(segment.text) : segment.text,
       // Convert words if they exist
-      words: segment.words && Array.isArray(segment.words) 
-        ? segment.words.map((word: any) => ({
-            ...word,
-            word: word.word ? toSimplified(word.word) : word.word
-          }))
-        : segment.words
+      words:
+        segment.words && Array.isArray(segment.words)
+          ? segment.words.map((word: any) => ({
+              ...word,
+              word: word.word ? toSimplified(word.word) : word.word
+            }))
+          : segment.words
     }));
   }
 
@@ -35,7 +36,7 @@ function convertSubtitlesToSimplified(subtitleData: any): any {
 // Helper function to get job result from Whisper ASR service
 async function getJobResult(jobId: string): Promise<any> {
   const WHISPER_ASR_URL = env.WHISPER_ASR_URL;
-  
+
   if (!WHISPER_ASR_URL) {
     throw new Error('WHISPER_ASR_URL environment variable is not configured');
   }
@@ -44,8 +45,8 @@ async function getJobResult(jobId: string): Promise<any> {
     const response = await fetch(`${WHISPER_ASR_URL}/get/${jobId}`, {
       method: 'GET',
       headers: {
-        'Accept': 'application/json',
-      },
+        Accept: 'application/json'
+      }
     });
 
     if (!response.ok) {
@@ -76,7 +77,7 @@ export const POST: RequestHandler = async ({ request }) => {
     switch (jobResult.status) {
       case 'completed':
         console.log('Job completed, processing result...');
-        
+
         // Parse the result if it's a string
         let subtitleData;
         if (typeof jobResult.result === 'string') {
@@ -131,9 +132,8 @@ export const POST: RequestHandler = async ({ request }) => {
           created_at: jobResult.created_at
         });
     }
-
   } catch (e: any) {
     console.error('Subtitle job status check error:', e);
     throw error(500, e.message || 'Failed to check subtitle generation job status');
   }
-}; 
+};

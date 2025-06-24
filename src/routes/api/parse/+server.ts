@@ -17,7 +17,7 @@ export const GET: RequestHandler = async ({ url: requestUrl, fetch: serverFetch 
     console.error(`Error in /api/parse for URL ${targetUrl}:`, e);
     const message = e.message || 'Failed to parse Bilibili URL';
     const statusMatch = message.match(/\((\d{3})\)/);
-    const status = statusMatch ? parseInt(statusMatch[1], 10) : (e.status || 500); // Use e.status if available
+    const status = statusMatch ? parseInt(statusMatch[1], 10) : e.status || 500; // Use e.status if available
     throw error(status, message);
   }
-}; 
+};

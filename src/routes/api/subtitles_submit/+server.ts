@@ -23,12 +23,13 @@ function convertSubtitlesToSimplified(subtitleData: any): any {
       ...segment,
       text: segment.text ? toSimplified(segment.text) : segment.text,
       // Convert words if they exist
-      words: segment.words && Array.isArray(segment.words) 
-        ? segment.words.map((word: any) => ({
-            ...word,
-            word: word.word ? toSimplified(word.word) : word.word
-          }))
-        : segment.words
+      words:
+        segment.words && Array.isArray(segment.words)
+          ? segment.words.map((word: any) => ({
+              ...word,
+              word: word.word ? toSimplified(word.word) : word.word
+            }))
+          : segment.words
     }));
   }
 
@@ -41,7 +42,9 @@ async function fetchBiliApiViaProxy(targetApiUrl: string, fetchFn: typeof fetch)
   const response = await fetchFn(proxyUrl);
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({ message: response.statusText }));
-    throw new Error(`Proxied Bilibili API request to ${targetApiUrl} failed (${response.status}): ${errorData.message || response.statusText}`);
+    throw new Error(
+      `Proxied Bilibili API request to ${targetApiUrl} failed (${response.status}): ${errorData.message || response.statusText}`
+    );
   }
   return response.json();
 }
@@ -50,10 +53,10 @@ async function fetchBiliApiViaProxy(targetApiUrl: string, fetchFn: typeof fetch)
 async function getAudioUrl(bvid: string, cid: string, fetchFn: typeof fetch): Promise<string> {
   // Use the playurl API to get stream URLs
   const playurlApiUrl = `https://api.bilibili.com/x/player/playurl?bvid=${bvid}&cid=${cid}&qn=6&fnval=1&platform=html5`;
-  
+
   try {
     const playurlData = await fetchBiliApiViaProxy(playurlApiUrl, fetchFn);
-    
+
     if (playurlData.code !== 0) {
       throw new Error(`Bilibili Playurl API error: ${playurlData.message}`);
     }
@@ -62,8 +65,8 @@ async function getAudioUrl(bvid: string, cid: string, fetchFn: typeof fetch): Pr
     if (playurlData.data?.dash?.audio && playurlData.data.dash.audio.length > 0) {
       // Get the highest quality audio stream
       const audioStreams = playurlData.data.dash.audio;
-      const highestQualityAudio = audioStreams.reduce((prev: any, current: any) => 
-        (prev.bandwidth > current.bandwidth) ? prev : current
+      const highestQualityAudio = audioStreams.reduce((prev: any, current: any) =>
+        prev.bandwidth > current.bandwidth ? prev : current
       );
       return highestQualityAudio.baseUrl || highestQualityAudio.base_url;
     }
@@ -83,7 +86,7 @@ async function getAudioUrl(bvid: string, cid: string, fetchFn: typeof fetch): Pr
 // Helper function to submit job to Whisper ASR service
 async function submitSubtitleJob(audioUrl: string, audioId?: string): Promise<any> {
   const WHISPER_ASR_URL = env.WHISPER_ASR_URL;
-  
+
   if (!WHISPER_ASR_URL) {
     throw new Error('WHISPER_ASR_URL environment variable is not configured');
   }
@@ -107,8 +110,8 @@ async function submitSubtitleJob(audioUrl: string, audioId?: string): Promise<an
     const response = await fetch(`${WHISPER_ASR_URL}/submit?${params}`, {
       method: 'POST',
       headers: {
-        'Accept': 'application/json',
-      },
+        Accept: 'application/json'
+      }
     });
 
     if (!response.ok) {
@@ -147,7 +150,7 @@ export const POST: RequestHandler = async ({ request, fetch }) => {
     // Step 3: Check if it's a cache hit (immediate result)
     if (submitResult.status === 'completed' && submitResult.cached) {
       console.log('Cache hit detected, returning result immediately');
-      
+
       // Parse the result if it's a string
       let subtitleData;
       if (typeof submitResult.result === 'string') {
@@ -163,7 +166,7 @@ export const POST: RequestHandler = async ({ request, fetch }) => {
 
       // Convert traditional Chinese to simplified Chinese
       const convertedSubtitles = convertSubtitlesToSimplified(subtitleData);
-      
+
       return json({
         success: true,
         job_id: submitResult.job_id,
@@ -189,9 +192,8 @@ export const POST: RequestHandler = async ({ request, fetch }) => {
         created_at: submitResult.created_at
       });
     }
-
   } catch (e: any) {
     console.error('Subtitle job submission error:', e);
     throw error(500, e.message || 'Failed to submit subtitle generation job');
   }
-}; 
+};

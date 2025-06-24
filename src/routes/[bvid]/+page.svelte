@@ -10,4 +10,4 @@
   <meta name="description" content="Parse Bilibili video {data.bvid} and display information" />
 </svelte:head>
 
-<BiliInfo initialBvid={data.bvid} /> 
+<BiliInfo initialBvid={data.bvid} />

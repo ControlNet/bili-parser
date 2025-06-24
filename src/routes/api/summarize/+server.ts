@@ -20,11 +20,16 @@ function getAvailableModel() {
     const anthropic = createAnthropic({ apiKey: ANTHROPIC_API_KEY });
     return anthropic('claude-3-haiku-20240307');
   }
-  if (GOOGLE_GENERATIVE_AI_API_KEY && GOOGLE_GENERATIVE_AI_API_KEY !== 'your_google_ai_api_key_here') {
+  if (
+    GOOGLE_GENERATIVE_AI_API_KEY &&
+    GOOGLE_GENERATIVE_AI_API_KEY !== 'your_google_ai_api_key_here'
+  ) {
     const google = createGoogleGenerativeAI({ apiKey: GOOGLE_GENERATIVE_AI_API_KEY });
     return google('gemma-3-27b-it');
   }
-  throw new Error('No LLM API key configured. Please set up at least one API key in environment variables.');
+  throw new Error(
+    'No LLM API key configured. Please set up at least one API key in environment variables.'
+  );
 }
 
 export const POST: RequestHandler = async ({ request }) => {
@@ -73,13 +78,12 @@ ${subtitleText}
       model,
       prompt,
       maxTokens: 1000,
-      temperature: 0.7,
+      temperature: 0.7
     });
 
     return result.toDataStreamResponse();
-
   } catch (e: any) {
     console.error('Video summarization error:', e);
     throw error(500, e.message || 'Failed to generate video summary');
   }
-}; 
+};

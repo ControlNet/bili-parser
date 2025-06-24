@@ -13,7 +13,7 @@
   // Convert BVID to proper format if needed
   $: videoId = bvid || aid;
   $: bvidParam = bvid ? `bvid=${bvid}` : `aid=${aid}`;
-  
+
   // Build iframe src URL
   $: iframeSrc = `https://player.bilibili.com/player.html?${bvidParam}&page=${page}&high_quality=${highQuality ? 1 : 0}&danmaku=${danmaku ? 1 : 0}&autoplay=${autoplay ? 1 : 0}`;
 
@@ -95,10 +95,10 @@
     .bilibili-player {
       margin: 0.5rem 0;
     }
-    
+
     .responsive-container {
       /* 16:9 aspect ratio for mobile */
       padding-bottom: 56.25%;
     }
   }
-</style> 
+</style>

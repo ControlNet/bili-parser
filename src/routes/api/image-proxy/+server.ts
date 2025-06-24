@@ -11,8 +11,9 @@ export const GET: RequestHandler = async ({ url: requestUrl, fetch: serverFetch 
     // Fetch the image with appropriate headers to avoid blocking
     const response = await serverFetch(imageUrl, {
       headers: {
-        'Referer': 'https://www.bilibili.com/',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        Referer: 'https://www.bilibili.com/',
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
       }
     });
 
@@ -32,11 +33,10 @@ export const GET: RequestHandler = async ({ url: requestUrl, fetch: serverFetch 
         'Cache-Control': 'public, max-age=3600' // Cache for 1 hour
       }
     });
-
   } catch (e: any) {
     console.error(`Error proxying image ${imageUrl}:`, e);
     const status = e.status || 500;
     const message = e.message || 'Failed to proxy image';
     throw error(status, message);
   }
-}; 
+};

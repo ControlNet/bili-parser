@@ -4,18 +4,30 @@
     formatVideoInfoForCopy,
     formatVideoInfoForRichCopy,
     formatVideoInfoForRichCopyWithEmbeddedImages,
-    fetchSubtitles,
-    generateVideoSummary,
-    type VideoInfoShape,
-    type SubtitleData,
-    extractBvid
+    type VideoInfoShape
   } from '$lib/biliUtils';
   import { Chat } from '@ai-sdk/svelte';
   import { onMount } from 'svelte';
   import { browser } from '$app/environment';
   import BilibiliPlayer from './BilibiliPlayer.svelte';
+  import { marked } from 'marked';
 
   export let initialBvid: string | undefined = undefined;
+
+  // Configure marked for security and reasonable defaults
+  marked.setOptions({
+    breaks: true, // Convert \n to <br>
+    gfm: true, // GitHub Flavored Markdown
+    async: false // Ensure synchronous operation
+  });
+
+  // Helper function to convert markdown to HTML safely
+  function markdownToHtml(markdown: string): string {
+    if (!markdown) return '';
+    const result = marked(markdown);
+    // Since we set async: false, this should always be a string
+    return typeof result === 'string' ? result : '';
+  }
 
   let biliUrl = '';
   let videoInfo: Partial<VideoInfoShape> = {};
@@ -36,11 +48,15 @@
   const chat = new Chat({
     api: '/api/chat',
     body: {
-      get videoInfo() { return videoInfo; },
-      get subtitles() { return videoInfo.subtitles; }
+      get videoInfo() {
+        return videoInfo;
+      },
+      get subtitles() {
+        return videoInfo.subtitles;
+      }
     },
     onFinish: () => {
-      // Auto-scroll to bottom when message finishes
+      // Auto-scroll to bottom when message finishes, then stop loading
       if (chatMessagesContainer) {
         chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
       }
@@ -56,14 +72,32 @@
   const originalHandleSubmit = chat.handleSubmit;
   chat.handleSubmit = (event?: { preventDefault?: () => void } | undefined, options?: any) => {
     chatLoading = true;
+    // Auto-scroll when user submits a message (they're actively engaging)
+    if (chatMessagesContainer) {
+      setTimeout(() => {
+        chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
+      }, 50);
+    }
     return originalHandleSubmit(event, options);
   };
 
-  // Auto-scroll when messages update or when streaming
-  $: if (chat.messages.length > 0 && chatMessagesContainer) {
+  // Auto-scroll ONLY when actively generating (chatLoading = true)
+  $: if (chatLoading && chat.messages.length > 0 && chatMessagesContainer) {
     setTimeout(() => {
       chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
     }, 50);
+  }
+
+  // Also auto-scroll when streaming content is being added to the last assistant message
+  $: if (
+    chatLoading &&
+    chat.messages.length > 0 &&
+    chat.messages[chat.messages.length - 1]?.role === 'assistant' &&
+    chatMessagesContainer
+  ) {
+    setTimeout(() => {
+      chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
+    }, 100);
   }
 
   // Handle initial BV ID from URL
@@ -72,7 +106,7 @@
       biliUrl = initialBvid;
       fetchAndSetVideoInfo();
     }
-    
+
     // Handle browser back/forward navigation
     const handlePopState = (event: PopStateEvent) => {
       if (browser) {
@@ -97,10 +131,10 @@
         }
       }
     };
-    
+
     if (browser) {
       window.addEventListener('popstate', handlePopState);
-      
+
       // Cleanup
       return () => {
         window.removeEventListener('popstate', handlePopState);
@@ -124,12 +158,12 @@
     try {
       const fetchedInfo = await getVideoInfo(biliUrl, fetch, false);
       videoInfo = fetchedInfo;
-      
+
       // Update URL if we have a valid BV ID (only in browser)
       if (videoInfo.bvid && browser) {
         const expectedPath = `/${videoInfo.bvid}`;
         const currentPath = window.location.pathname;
-        
+
         if (currentPath !== expectedPath) {
           // Use pushState when navigating from root to create browser history
           // Use replaceState when already on a BV ID route to avoid duplicate entries
@@ -140,7 +174,7 @@
             // Already on a BV ID route - just update current entry
             window.history.replaceState({ bvid: videoInfo.bvid }, '', expectedPath);
           }
-          
+
           // Update document title to reflect the BV ID
           document.title = `Bilibili Info Parser - ${videoInfo.bvid}`;
         }
@@ -193,7 +227,7 @@
       if (submitResult.status === 'completed' && submitResult.cached) {
         // Cache hit - process result immediately
         subtitleStatus = '处理成功';
-        
+
         // Parse the result if it's a string
         let subtitleData;
         if (typeof submitResult.result === 'string') {
@@ -209,13 +243,14 @@
         videoInfo.subtitles = subtitleData;
         showSubtitles = true;
         subtitleLoading = false;
-        setTimeout(() => { subtitleStatus = ''; }, 3000);
+        setTimeout(() => {
+          subtitleStatus = '';
+        }, 3000);
       } else {
         // No cache hit - start polling
         subtitleStatus = '任务已提交，正在处理...';
         await pollForSubtitleResult();
       }
-
     } catch (e: any) {
       console.error('Error generating subtitles:', e);
       subtitleError = e.message || '生成字幕时发生错误';
@@ -234,7 +269,7 @@
     const poll = async () => {
       try {
         attempts++;
-        
+
         const response = await fetch('/api/subtitles_get', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -253,7 +288,9 @@
             showSubtitles = true;
             subtitleLoading = false;
             subtitleStatus = '字幕生成完成！';
-            setTimeout(() => { subtitleStatus = ''; }, 3000);
+            setTimeout(() => {
+              subtitleStatus = '';
+            }, 3000);
             return;
 
           case 'failed':
@@ -274,7 +311,6 @@
         } else {
           throw new Error('字幕生成超时，请稍后重试');
         }
-
       } catch (e: any) {
         console.error('Error polling for subtitle result:', e);
         subtitleError = e.message || '检查字幕生成状态时发生错误';
@@ -325,12 +361,12 @@
       try {
         while (true) {
           const { done, value } = await reader.read();
-          
+
           if (done) break;
-          
+
           const chunk = decoder.decode(value, { stream: true });
           const lines = chunk.split('\n');
-          
+
           for (const line of lines) {
             if (line.startsWith('0:')) {
               // Parse the streaming data format
@@ -353,7 +389,6 @@
       } finally {
         reader.releaseLock();
       }
-
     } catch (e: any) {
       console.error('Error generating summary:', e);
       summaryError = e.message || '生成摘要时发生错误';
@@ -384,7 +419,9 @@
       }
 
       // Generate HTML content with embedded images
-      const htmlContent = await formatVideoInfoForRichCopyWithEmbeddedImages(videoInfo as VideoInfoShape);
+      const htmlContent = await formatVideoInfoForRichCopyWithEmbeddedImages(
+        videoInfo as VideoInfoShape
+      );
       const plainTextContent = formatVideoInfoForCopy(videoInfo as VideoInfoShape);
 
       // Create clipboard items with both HTML and plain text
@@ -402,12 +439,12 @@
       }, 2000);
     } catch (err) {
       console.error('无法复制富文本: ', err);
-      
+
       // Fallback to simple HTML copy without embedded images
       try {
         const simpleHtmlContent = formatVideoInfoForRichCopy(videoInfo as VideoInfoShape);
         const plainTextContent = formatVideoInfoForCopy(videoInfo as VideoInfoShape);
-        
+
         const clipboardItems = [
           new ClipboardItem({
             'text/html': new Blob([simpleHtmlContent], { type: 'text/html' }),
@@ -438,8 +475,12 @@
     <button on:click={fetchAndSetVideoInfo} disabled={loading}>
       {loading ? '加载中...' : '获取信息'}
     </button>
-    {#if videoInfo.title} 
-      <button on:click={copyCurrentInfoToClipboard} class="copy-button" disabled={copyButtonText !== '复制信息'}>
+    {#if videoInfo.title}
+      <button
+        on:click={copyCurrentInfoToClipboard}
+        class="copy-button"
+        disabled={copyButtonText !== '复制信息'}
+      >
         {copyButtonText}
       </button>
     {/if}
@@ -459,16 +500,14 @@
 
   <!-- Welcome Placeholder -->
   {#if !videoInfo.title && !error}
-    <div class="welcome-section" class:loading={loading}>
+    <div class="welcome-section" class:loading>
       <div class="welcome-content">
-        <div class="welcome-icon">
-          🎬
-        </div>
+        <div class="welcome-icon">🎬</div>
         <h2 class="welcome-title">欢迎使用 Bilibili 解析器</h2>
         <p class="welcome-description">
           解析 Bilibili 视频信息，生成 AI 字幕和摘要，与 AI 聊天视频内容
         </p>
-        
+
         <div class="feature-grid">
           <div class="feature-item">
             <span class="feature-icon">📊</span>
@@ -499,7 +538,11 @@
         <div class="github-section">
           <p>
             <span class="github-icon">💻</span>
-            开源项目：<a href="https://github.com/ControlNet/bili-parser" target="_blank" rel="noopener noreferrer">github.com/ControlNet/bili-parser</a>
+            开源项目：<a
+              href="https://github.com/ControlNet/bili-parser"
+              target="_blank"
+              rel="noopener noreferrer">github.com/ControlNet/bili-parser</a
+            >
           </p>
         </div>
       </div>
@@ -516,13 +559,21 @@
     </div>
   {/if}
 
-  {#if videoInfo.title} 
+  {#if videoInfo.title}
     <div class="info-display">
       {#if videoInfo.pic}
-        <img src={videoInfo.pic} alt="Video Thumbnail" class="thumbnail" referrerpolicy="no-referrer" />
+        <img
+          src={videoInfo.pic}
+          alt="Video Thumbnail"
+          class="thumbnail"
+          referrerpolicy="no-referrer"
+        />
       {/if}
       <h2>标题: {videoInfo.title}</h2>
-      <p>UP主: {videoInfo.upName} {#if videoInfo.upFans && videoInfo.upFans !== 'N/A'}粉丝: {videoInfo.upFans}{/if}</p>
+      <p>
+        UP主: {videoInfo.upName}
+        {#if videoInfo.upFans && videoInfo.upFans !== 'N/A'}粉丝: {videoInfo.upFans}{/if}
+      </p>
       <div class="stats">
         <span>👀播放: {videoInfo.views}</span>
         <span>💬弹幕: {videoInfo.danmaku}</span>
@@ -539,10 +590,17 @@
         <p>📝简介: {videoInfo.description || '无'}</p>
       </div>
       {#if videoInfo.watchingTotal && videoInfo.watchingTotal !== 'N/A'}
-        <p>🏄‍♂️ 总共 {videoInfo.watchingTotal} 人在观看{#if videoInfo.watchingWeb && videoInfo.watchingWeb !== 'N/A'}，{videoInfo.watchingWeb} 人在网页端观看{/if}</p>
+        <p>
+          🏄‍♂️ 总共 {videoInfo.watchingTotal} 人在观看{#if videoInfo.watchingWeb && videoInfo.watchingWeb !== 'N/A'}，{videoInfo.watchingWeb}
+            人在网页端观看{/if}
+        </p>
       {/if}
       {#if videoInfo.cleanedUrl}
-         <p><a href={videoInfo.cleanedUrl} target="_blank" rel="noopener noreferrer">{videoInfo.cleanedUrl}</a></p>
+        <p>
+          <a href={videoInfo.cleanedUrl} target="_blank" rel="noopener noreferrer"
+            >{videoInfo.cleanedUrl}</a
+          >
+        </p>
       {/if}
 
       <!-- Video Player Section -->
@@ -550,8 +608,8 @@
         <div class="video-player-section">
           <h3>🎬 视频播放器</h3>
           <div class="player-container">
-            <BilibiliPlayer 
-              bvid={videoInfo.bvid} 
+            <BilibiliPlayer
+              bvid={videoInfo.bvid}
               highQuality={true}
               danmaku={false}
               responsive={true}
@@ -565,14 +623,16 @@
       {#if videoInfo.title}
         <div class="subtitles-section">
           <h3>🎵 字幕内容</h3>
-          
+
           {#if showSubtitles && videoInfo.subtitles && videoInfo.subtitles.segments && videoInfo.subtitles.segments.length > 0}
             <!-- Show subtitles, button removed after generation -->
             <div class="subtitle-segments">
               <div class="segments-container">
                 {#each videoInfo.subtitles.segments as segment}
                   <div class="segment">
-                    <span class="timestamp">{formatTime(segment.start)} - {formatTime(segment.end)}</span>
+                    <span class="timestamp"
+                      >{formatTime(segment.start)} - {formatTime(segment.end)}</span
+                    >
                     <span class="segment-text">{segment.text}</span>
                   </div>
                 {/each}
@@ -583,7 +643,11 @@
             <div class="subtitle-content-center">
               <!-- Subtitle Generation Button in the middle -->
               <div class="subtitle-button-container">
-                <button on:click={generateSubtitles} class="subtitle-button" disabled={subtitleLoading}>
+                <button
+                  on:click={generateSubtitles}
+                  class="subtitle-button"
+                  disabled={subtitleLoading}
+                >
                   {#if subtitleLoading}
                     <span class="loading-spinner"></span>
                     生成AI字幕
@@ -602,13 +666,20 @@
 
       <!-- AI Summary Section - Always visible when video exists -->
       {#if videoInfo.title}
-        <div class="ai-section" class:disabled={!videoInfo.subtitles || !videoInfo.subtitles.segments || videoInfo.subtitles.segments.length === 0}>
+        <div
+          class="ai-section"
+          class:disabled={!videoInfo.subtitles ||
+            !videoInfo.subtitles.segments ||
+            videoInfo.subtitles.segments.length === 0}
+        >
           <h3>🤖 AI视频摘要</h3>
-          
+
           {#if showSummary && (videoInfo.summary || summaryLoading)}
             <!-- Show summary content -->
             <div class="summary-content">
-              <pre>{videoInfo.summary}</pre>
+              {#if videoInfo.summary}
+                {@html markdownToHtml(videoInfo.summary)}
+              {/if}
               {#if summaryLoading && videoInfo.summary}
                 <span class="typing-indicator">AI正在继续生成...</span>
               {/if}
@@ -617,11 +688,13 @@
             <!-- Show generate summary button -->
             <div class="ai-button-container">
               {#if !videoInfo.subtitles || !videoInfo.subtitles.segments || videoInfo.subtitles.segments.length === 0}
-                <button class="ai-button summary-button" disabled>
-                  需要先生成字幕
-                </button>
+                <button class="ai-button summary-button" disabled> 需要先生成字幕 </button>
               {:else}
-                <button on:click={generateSummary} class="ai-button summary-button" disabled={summaryLoading}>
+                <button
+                  on:click={generateSummary}
+                  class="ai-button summary-button"
+                  disabled={summaryLoading}
+                >
                   {#if summaryLoading}
                     <span class="loading-spinner"></span>
                     生成AI摘要
@@ -637,9 +710,14 @@
 
       <!-- AI Chat Section - Always visible when video exists -->
       {#if videoInfo.title}
-        <div class="ai-section" class:disabled={!videoInfo.subtitles || !videoInfo.subtitles.segments || videoInfo.subtitles.segments.length === 0}>
+        <div
+          class="ai-section"
+          class:disabled={!videoInfo.subtitles ||
+            !videoInfo.subtitles.segments ||
+            videoInfo.subtitles.segments.length === 0}
+        >
           <h3>💬 与AI聊天视频内容</h3>
-          
+
           {#if showChat && videoInfo.subtitles && videoInfo.subtitles.segments && videoInfo.subtitles.segments.length > 0}
             <!-- Show chat interface -->
             <div class="chat-container">
@@ -649,7 +727,13 @@
                     <div class="message-content">
                       {#each message.parts as part}
                         {#if part.type === 'text'}
-                          <span class="message-text">{part.text}</span>
+                          {#if message.role === 'assistant'}
+                            <div class="message-text markdown-content">
+                              {@html markdownToHtml(part.text)}
+                            </div>
+                          {:else}
+                            <span class="message-text">{part.text}</span>
+                          {/if}
                         {/if}
                       {/each}
                       {#if message.role === 'assistant' && i === chat.messages.length - 1 && chatLoading}
@@ -658,7 +742,7 @@
                     </div>
                   </div>
                 {/each}
-                
+
                 {#if chatLoading && chat.messages.length === 0}
                   <div class="message assistant">
                     <div class="message-content">
@@ -667,7 +751,7 @@
                   </div>
                 {/if}
               </div>
-              
+
               <form on:submit={chat.handleSubmit} class="chat-form">
                 <input
                   bind:value={chat.input}
@@ -675,7 +759,11 @@
                   class="chat-input"
                   disabled={chatLoading}
                 />
-                <button type="submit" class="chat-send" disabled={chatLoading || !chat.input.trim()}>
+                <button
+                  type="submit"
+                  class="chat-send"
+                  disabled={chatLoading || !chat.input.trim()}
+                >
                   {#if chatLoading}
                     <span class="loading-spinner"></span>
                     发送中
@@ -689,11 +777,9 @@
             <!-- Show start chat button -->
             <div class="ai-button-container">
               {#if !videoInfo.subtitles || !videoInfo.subtitles.segments || videoInfo.subtitles.segments.length === 0}
-                <button class="ai-button chat-button" disabled>
-                  需要先生成字幕
-                </button>
+                <button class="ai-button chat-button" disabled> 需要先生成字幕 </button>
               {:else}
-                <button on:click={() => showChat = true} class="ai-button chat-button">
+                <button on:click={() => (showChat = true)} class="ai-button chat-button">
                   与AI聊天
                 </button>
               {/if}
@@ -710,7 +796,9 @@
     max-width: 800px;
     margin: 20px auto;
     padding: 20px;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+    font-family:
+      -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans',
+      'Helvetica Neue', sans-serif;
     border: 1px solid #ccc;
     border-radius: 8px;
     background-color: #f9f9f9;
@@ -751,7 +839,7 @@
     margin-bottom: 20px;
   }
 
-  .input-area input[type="text"] {
+  .input-area input[type='text'] {
     flex-grow: 1;
     padding: 10px;
     border: 1px solid #ddd;
@@ -809,7 +897,7 @@
     border-radius: 4px;
     font-size: 0.9em;
   }
-  
+
   .description {
     margin-top: 15px;
     padding: 10px;
@@ -881,7 +969,7 @@
   .subtitle-button:hover:not(:disabled) {
     background-color: #138496;
     transform: translateY(-1px);
-    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
   }
 
   .subtitle-button:disabled {
@@ -911,8 +999,12 @@
   }
 
   @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
+    0% {
+      transform: rotate(0deg);
+    }
+    100% {
+      transform: rotate(360deg);
+    }
   }
 
   .subtitles-section {
@@ -1119,15 +1211,89 @@
     padding: 15px;
     border-radius: 6px;
     border: 1px solid #e9ecef;
-  }
-
-  .summary-content pre {
-    white-space: pre-wrap;
-    word-break: break-word;
-    margin: 0;
-    font-family: inherit;
     line-height: 1.6;
     min-height: 20px; /* Prevent layout shift */
+  }
+
+  /* Markdown content styling for summary */
+  .summary-content :global(h1),
+  .summary-content :global(h2),
+  .summary-content :global(h3),
+  .summary-content :global(h4),
+  .summary-content :global(h5),
+  .summary-content :global(h6) {
+    margin: 1em 0 0.5em 0;
+    font-weight: 600;
+    color: #333;
+  }
+
+  /* Remove top margin from first child to eliminate gap */
+  .summary-content :global(*:first-child) {
+    margin-top: 0 !important;
+  }
+
+  .summary-content :global(h1) {
+    font-size: 1.5em;
+  }
+  .summary-content :global(h2) {
+    font-size: 1.3em;
+  }
+  .summary-content :global(h3) {
+    font-size: 1.1em;
+  }
+
+  .summary-content :global(p) {
+    margin: 0.5em 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .summary-content :global(ul),
+  .summary-content :global(ol) {
+    margin: 0.5em 0;
+    padding-left: 1.5em;
+  }
+
+  .summary-content :global(li) {
+    margin: 0.25em 0;
+  }
+
+  .summary-content :global(blockquote) {
+    margin: 1em 0;
+    padding: 0.5em 1em;
+    border-left: 3px solid #ddd;
+    background-color: #f8f9fa;
+    font-style: italic;
+  }
+
+  .summary-content :global(code) {
+    background-color: #f1f3f4;
+    padding: 0.1em 0.3em;
+    border-radius: 3px;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 0.9em;
+  }
+
+  .summary-content :global(pre) {
+    background-color: #f1f3f4;
+    padding: 1em;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin: 1em 0;
+  }
+
+  .summary-content :global(pre code) {
+    background-color: transparent;
+    padding: 0;
+    border-radius: 0;
+  }
+
+  .summary-content :global(strong) {
+    font-weight: 600;
+  }
+
+  .summary-content :global(em) {
+    font-style: italic;
   }
 
   .summary-content .typing-indicator {
@@ -1140,8 +1306,12 @@
   }
 
   @keyframes pulse {
-    0% { opacity: 0.6; }
-    100% { opacity: 1; }
+    0% {
+      opacity: 0.6;
+    }
+    100% {
+      opacity: 1;
+    }
   }
 
   .chat-container {
@@ -1158,6 +1328,7 @@
     border: 1px solid #e9ecef;
     border-radius: 6px 6px 0 0;
     margin-bottom: 0;
+    scroll-behavior: smooth;
   }
 
   .message {
@@ -1183,6 +1354,93 @@
 
   .message-text {
     display: inline;
+  }
+
+  /* Markdown content styling for chat messages */
+  .markdown-content {
+    display: block !important;
+    line-height: 1.5;
+    white-space: normal;
+  }
+
+  .markdown-content :global(p) {
+    margin: 0.5em 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .markdown-content :global(h1),
+  .markdown-content :global(h2),
+  .markdown-content :global(h3),
+  .markdown-content :global(h4),
+  .markdown-content :global(h5),
+  .markdown-content :global(h6) {
+    margin: 0.8em 0 0.4em 0;
+    font-weight: 600;
+  }
+
+  .markdown-content :global(h1) {
+    font-size: 1.3em;
+  }
+  .markdown-content :global(h2) {
+    font-size: 1.2em;
+  }
+  .markdown-content :global(h3) {
+    font-size: 1.1em;
+  }
+
+  .markdown-content :global(ul),
+  .markdown-content :global(ol) {
+    margin: 0.5em 0;
+    padding-left: 1.2em;
+  }
+
+  .markdown-content :global(li) {
+    margin: 0.2em 0;
+  }
+
+  .markdown-content :global(blockquote) {
+    margin: 0.5em 0;
+    padding: 0.4em 0.8em;
+    border-left: 2px solid #ddd;
+    background-color: rgba(0, 0, 0, 0.05);
+    font-style: italic;
+  }
+
+  .markdown-content :global(code) {
+    background-color: rgba(0, 0, 0, 0.1);
+    padding: 0.1em 0.3em;
+    border-radius: 3px;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 0.9em;
+  }
+
+  .markdown-content :global(pre) {
+    background-color: rgba(0, 0, 0, 0.1);
+    padding: 0.8em;
+    border-radius: 4px;
+    overflow-x: auto;
+    margin: 0.5em 0;
+  }
+
+  .markdown-content :global(pre code) {
+    background-color: transparent;
+    padding: 0;
+    border-radius: 0;
+  }
+
+  .markdown-content :global(strong) {
+    font-weight: 600;
+  }
+
+  .markdown-content :global(em) {
+    font-style: italic;
+  }
+
+  .markdown-content :global(br) {
+    display: block;
+    margin: 0.3em 0;
+    content: '';
   }
 
   .message.user .message-content {
@@ -1211,13 +1469,25 @@
   }
 
   @keyframes cursor-blink {
-    0%, 50% { opacity: 1; }
-    51%, 100% { opacity: 0; }
+    0%,
+    50% {
+      opacity: 1;
+    }
+    51%,
+    100% {
+      opacity: 0;
+    }
   }
 
   @keyframes blink {
-    0%, 50% { opacity: 1; }
-    51%, 100% { opacity: 0.3; }
+    0%,
+    50% {
+      opacity: 1;
+    }
+    51%,
+    100% {
+      opacity: 0.3;
+    }
   }
 
   .chat-form {
@@ -1284,8 +1554,13 @@
   }
 
   @keyframes float {
-    0%, 100% { transform: translateY(0px); }
-    50% { transform: translateY(-8px); }
+    0%,
+    100% {
+      transform: translateY(0px);
+    }
+    50% {
+      transform: translateY(-8px);
+    }
   }
 
   .welcome-title {
@@ -1405,20 +1680,20 @@
     .welcome-section {
       padding: 15px;
     }
-    
+
     .welcome-title {
       font-size: 1.5rem;
     }
-    
+
     .welcome-description {
       font-size: 0.95rem;
     }
-    
+
     .feature-grid {
       grid-template-columns: repeat(3, 1fr);
       gap: 0.6rem;
     }
-    
+
     .feature-item {
       padding: 0.6rem 0.3rem;
     }
@@ -1437,5 +1712,4 @@
       grid-template-columns: repeat(2, 1fr);
     }
   }
-
-</style> 
+</style>
