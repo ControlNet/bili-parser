@@ -1,4 +1,6 @@
 import io
+import tempfile
+from pathlib import Path
 import win32clipboard
 from PIL import Image as PILImage
 import requests
@@ -53,24 +55,23 @@ def _prepare_cf_html(html_content: str) -> bytes:
 
 def load_image(image_url: str) -> str:
     """
-    Loads an image from a URL, resizes it if it's too large (PNG size > 10MB),
-    and returns it as a base64 encoded PNG data URI.
+    Loads an image from a URL, resizes it if it's too large (PNG size > MAX_IMAGE_SIZE_BYTES),
+    saves it to a temp PNG file, and returns a file:// URI for HTML <img src="...">.
+
     Returns an empty string on failure.
     """
     try:
-        response = requests.get(image_url, stream=True, timeout=10) # Added timeout
+        response = requests.get(image_url, stream=True, timeout=10)
         response.raise_for_status()
-        
-        image_data_bytes = response.raw.read()
 
+        image_data_bytes = response.raw.read()
         img = PILImage.open(io.BytesIO(image_data_bytes))
-        
+
         # Convert to RGBA to handle transparency if any, before saving as PNG
         if img.mode not in ('RGB', 'RGBA'):
-             img = img.convert('RGBA')
-        elif img.mode == 'P': # Palette mode, common in GIFs
-             img = img.convert('RGBA')
-
+            img = img.convert('RGBA')
+        elif img.mode == 'P':  # Palette mode, common in GIFs
+            img = img.convert('RGBA')
 
         output_png_buffer = io.BytesIO()
         img.save(output_png_buffer, format="PNG")
@@ -81,14 +82,14 @@ def load_image(image_url: str) -> str:
         while len(png_data) > MAX_IMAGE_SIZE_BYTES and \
               current_width * RESIZE_FACTOR >= MIN_DIMENSION and \
               current_height * RESIZE_FACTOR >= MIN_DIMENSION:
-            
+
             print(f"Image from {image_url} is too large ({len(png_data)/(1024*1024):.2f} MB). Resizing...")
-            
+
             current_width = int(current_width * RESIZE_FACTOR)
             current_height = int(current_height * RESIZE_FACTOR)
-            
+
             resized_img = img.resize((current_width, current_height), PILImage.Resampling.LANCZOS)
-            
+
             output_png_buffer.seek(0)
             output_png_buffer.truncate()
             resized_img.save(output_png_buffer, format="PNG")
@@ -98,19 +99,26 @@ def load_image(image_url: str) -> str:
         if len(png_data) > MAX_IMAGE_SIZE_BYTES:
             print(f"Warning: Image from {image_url} still too large ({len(png_data)/(1024*1024):.2f} MB) after resizing. Proceeding.")
 
-        base64_image = base64.b64encode(png_data).decode('utf-8')
-        return f"data:image/png;base64,{base64_image}"
+        # Write to a temp file and return file:// URI
+        tmp = tempfile.NamedTemporaryFile(prefix="bili_", suffix=".png", delete=False)
+        try:
+            tmp.write(png_data)
+            tmp.flush()
+        finally:
+            tmp.close()
+
+        return Path(tmp.name).resolve().as_uri()
 
     except requests.exceptions.RequestException as e:
-        print(f"Error fetching image for load_image from URL: {image_url}\\n{e}")
+        print(f"Error fetching image for load_image from URL: {image_url}\n{e}")
         return ""
     except PILImage.UnidentifiedImageError:
         print(f"Error: Cannot identify image file from URL (Pillow): {image_url}")
         return ""
-    except IOError as e: 
+    except IOError as e:
         print(f"Error processing image with Pillow for URL {image_url}: {e}")
         return ""
-    except Exception as e: 
+    except Exception as e:
         print(f"An unexpected error occurred in load_image for URL {image_url}: {e}")
         return ""
 
