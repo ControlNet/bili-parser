@@ -5,6 +5,7 @@ import pyperclip
 import requests
 import re
 import json
+BILIBILI_HEADERS = {"User-Agent": "desktop/0.1"}
 
 
 if platform.system() == "Windows":
@@ -43,11 +44,12 @@ def resolve_b23_url(short_url_input: str) -> str | None:
         return short_url_input 
 
     try:
-        # Standard headers to mimic a browser
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-        response = requests.get(target_b23_url, headers=headers, allow_redirects=False, timeout=5)
+        response = requests.get(
+            target_b23_url,
+            headers=BILIBILI_HEADERS,
+            allow_redirects=False,
+            timeout=5,
+        )
         if response.status_code in [301, 302]:
             location = response.headers.get('Location')
             if location:
@@ -97,10 +99,6 @@ def parse_bili(url_input: str) -> str:
     print(f"Extracted BVID: {bvid}")
 
     # Step 3: Fetch data from Bilibili APIs
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Referer': 'https://www.bilibili.com/'
-    }
 
     video_info = {
         'title': 'N/A',
@@ -126,7 +124,7 @@ def parse_bili(url_input: str) -> str:
         # 1. Get video details
         view_api_url = f"https://api.bilibili.com/x/web-interface/view?bvid={bvid}"
         print(f"Fetching main info: {view_api_url}")
-        resp_view = requests.get(view_api_url, headers=headers, timeout=5)
+        resp_view = requests.get(view_api_url, headers=BILIBILI_HEADERS, timeout=5)
         resp_view.raise_for_status()
         view_data = resp_view.json()
 
@@ -152,7 +150,9 @@ def parse_bili(url_input: str) -> str:
         if video_info['upMid']:
             relation_api_url = f"https://api.bilibili.com/x/relation/stat?vmid={video_info['upMid']}"
             print(f"Fetching fan count: {relation_api_url}")
-            resp_relation = requests.get(relation_api_url, headers=headers, timeout=5)
+            resp_relation = requests.get(
+                relation_api_url, headers=BILIBILI_HEADERS, timeout=5
+            )
             resp_relation.raise_for_status()
             relation_data = resp_relation.json()
             if relation_data.get('code') == 0:
@@ -164,7 +164,7 @@ def parse_bili(url_input: str) -> str:
         if video_info['cid']:
             online_api_url = f"https://api.bilibili.com/x/player/online/total?bvid={bvid}&cid={video_info['cid']}"
             print(f"Fetching online count: {online_api_url}")
-            resp_online = requests.get(online_api_url, headers=headers, timeout=5)
+            resp_online = requests.get(online_api_url, headers=BILIBILI_HEADERS, timeout=5)
             resp_online.raise_for_status()
             online_data = resp_online.json()
             if online_data.get('code') == 0 and online_data.get('data'):
