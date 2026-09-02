@@ -25,22 +25,8 @@ export const GET: RequestHandler = async ({ url }) => {
     );
   }
 
-  // Forward only specific, safe headers. Avoid forwarding all client headers.
-  const requestHeaders = new Headers();
-  requestHeaders.append('Accept', 'application/json, text/plain, */*');
-  requestHeaders.append(
-    'User-Agent',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-  ); // A common user agent
-  // Bilibili API might require Referer for some endpoints
-  requestHeaders.append('Referer', 'https://www.bilibili.com/');
-
   try {
-    const response = await fetch(apiUrlToProxy, {
-      method: 'GET', // Assuming GET, adjust if other methods are needed
-      headers: requestHeaders
-    });
-
+    const response = await fetch(apiUrlToProxy);
     if (!response.ok) {
       // Forward the status and statusText from the Bilibili API response
       // Also send back the Bilibili API's response body if available, for debugging
